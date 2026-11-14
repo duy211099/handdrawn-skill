@@ -1,0 +1,1308 @@
+// handdrawn kit — hand-drawn 2D SVG illustrations: ink + flat marker wash on cream paper.
+// Plain JS, no dependencies. Runs in Node and in the browser (ES module).
+// MIT licence. Written from scratch.
+//
+//   import { createKit } from './kit.js';
+//   const k = createKit({ seed: 7, width: 1000, height: 1000 });
+//   k.circle(500, 500, 200, { fill: 'red' });
+//   const svg = k.toSVG();
+//
+// Coordinates: sheet units, x right, y down. Draw order is call order (back to front).
+
+/* ------------------------------------------------------------------ random */
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/* ------------------------------------------------------------------ small maths */
+
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+const fmt = (n) => { const r = Math.round(n * 10) / 10; return (r === 0 ? 0 : r).toString(); };
+const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+function polyLen(P) { let L = 0; for (let i = 1; i < P.length; i++) L += dist(P[i - 1], P[i]); return L; }
+
+function resample(P, step) {
+  if (P.length < 2) return P.map((p) => [p[0], p[1]]);
+  const out = [[P[0][0], P[0][1]]];
+  let need = step;
+  for (let i = 1; i < P.length; i++) {
+    let a = P[i - 1], b = P[i];
+    let seg = dist(a, b);
+    let pos = 0;
+    while (seg - pos >= need) {
+      pos += need;
+      const t = pos / seg;
+      out.push([lerp(a[0], b[0], t), lerp(a[1], b[1], t)]);
+      need = step;
+    }
+    need -= seg - pos;
+  }
+  const last = P[P.length - 1];
+  if (dist(out[out.length - 1], last) > step * 0.25) out.push([last[0], last[1]]);
+  else out[out.length - 1] = [last[0], last[1]];
+  return out;
+}
+
+function signedArea(P) {
+  let s = 0;
+  for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; s += a[0] * b[1] - b[0] * a[1]; }
+  return s / 2;
+}
+function bboxOf(P) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of P) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+}
+
+// Catmull-Rom through points. A point given as [x, y, 'c'] is a sharp corner.
+function catmull(points, closed, step = 2) {
+  const P = points;
+  const n = P.length;
+  if (n < 2) return P.map((p) => [p[0], p[1]]);
+  const corner = (i) => P[(i + n) % n][2] === 'c' || P[(i + n) % n][2] === true;
+  const out = [];
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const p1 = P[i], p2 = P[(i + 1) % n];
+    let p0 = closed ? P[(i - 1 + n) % n] : P[i - 1] || p1;
+    let p3 = closed ? P[(i + 2) % n] : P[i + 2] || p2;
+    if (corner(i)) p0 = p1;
+    if (corner(i + 1)) p3 = p2;
+    const L = dist(p1, p2);
+    const m = Math.max(2, Math.ceil(L / step));
+    for (let j = 0; j < m; j++) {
+      const t = j / m, t2 = t * t, t3 = t2 * t;
+      const f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+      out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  if (!closed) out.push([P[n - 1][0], P[n - 1][1]]);
+  return out;
+}
+
+// One side of a line through a polygon: parameter intervals [t0,t1] where the line is inside.
+function lineIntervals(poly, o, d) {
+  const ts = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const ex = b[0] - a[0], ey = b[1] - a[1];
+    const den = d[0] * ey - d[1] * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const wx = a[0] - o[0], wy = a[1] - o[1];
+    const t = (wx * ey - wy * ex) / den;
+    const u = (wx * d[1] - wy * d[0]) / den;
+    if (u >= 0 && u < 1) ts.push(t);
+  }
+  ts.sort((x, y) => x - y);
+  const iv = [];
+  for (let i = 0; i + 1 < ts.length; i += 2) iv.push([ts[i], ts[i + 1]]);
+  return iv;
+}
+function subtractIntervals(A, B) {
+  let out = A.map((x) => x.slice());
+  for (const [b0, b1] of B) {
+    const next = [];
+    for (const [a0, a1] of out) {
+      if (b1 <= a0 || b0 >= a1) { next.push([a0, a1]); continue; }
+      if (b0 > a0) next.push([a0, b0]);
+      if (b1 < a1) next.push([b1, a1]);
+    }
+    out = next;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ colour */
+
+const PALETTE = {
+  ink: '#2c2620', paper: '#f4ecdc',
+  red: '#d9705f', brick: '#bf5a4c', coral: '#ea9580', orange: '#e8a35f', ochre: '#ddb25f',
+  yellow: '#efd47e', cream: '#f6e8c8', sage: '#a9bf93', green: '#82ad78', leaf: '#93b86f',
+  olive: '#a7a865', teal: '#79aea6', mint: '#b9d8c4', sky: '#aac8df', blue: '#7f9fcf', navy: '#617399',
+  lilac: '#bba8cf', plum: '#9c7598', pink: '#efb3ac', blush: '#f3c4b8', sand: '#e3d0a9',
+  wood: '#c99d6e', brown: '#a07757', chocolate: '#7e5c46', grey: '#b5afa5', stone: '#d0c9bd',
+  charcoal: '#6d665f', white: '#fbf8f1', shadow: '#d9ccb3', skin: '#f2cdb0', tan: '#d9a77f',
+};
+// chromatic pigments that arbitrary colours are pulled toward
+const PIGMENTS = ['red', 'coral', 'orange', 'ochre', 'yellow', 'sage', 'green', 'leaf', 'teal', 'sky', 'blue', 'navy', 'lilac', 'plum', 'pink', 'wood', 'brown'];
+
+function hexToRgb(h) {
+  h = h.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255);
+}
+const toHex = (rgb) => '#' + rgb.map((v) => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
+const s2l = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const l2s = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055);
+function rgbToOklch(rgb) {
+  const [r, g, b] = rgb.map(s2l);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
+}
+function oklchToRgb([L, C, h]) {
+  const A = C * Math.cos((h * Math.PI) / 180), B = C * Math.sin((h * Math.PI) / 180);
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ].map((c) => l2s(Math.max(0, c)));
+}
+function inGamut(rgb) { return rgb.every((v) => v >= -0.002 && v <= 1.002); }
+function fromOklch(lch) {
+  let [L, C, h] = lch;
+  let rgb = oklchToRgb([L, C, h]);
+  let lo = 0, hi = C;
+  if (!inGamut(rgb)) { for (let i = 0; i < 18; i++) { const mid = (lo + hi) / 2; if (inGamut(oklchToRgb([L, mid, h]))) lo = mid; else hi = mid; } rgb = oklchToRgb([L, lo, h]); }
+  return toHex(rgb);
+}
+const hueDiff = (a, b) => ((b - a + 540) % 360) - 180;
+const PIGMENT_LCH = PIGMENTS.map((n) => rgbToOklch(hexToRgb(PALETTE[n])));
+
+/** Pull any colour into the marker look: lift lightness, cap chroma, pull hue toward the nearest pigment. */
+const KIT_MADE = new Set(); // colours the kit already produced (soften/darker/lighter): never re-soften them
+const made = (hex) => { KIT_MADE.add(hex); return hex; };
+function soften(c) {
+  if (c == null || c === false || c === 'none') return null;
+  if (PALETTE[c]) return PALETTE[c];
+  if (KIT_MADE.has(c)) return c;
+  if (typeof c !== 'string' || c[0] !== '#') return PALETTE.grey;
+  let [L, C, h] = rgbToOklch(hexToRgb(c));
+  L = 0.5 + 0.47 * L;               // nothing darker than a soft grey, nothing glaring white
+  C = Math.min(C * 0.8, 0.105);
+  if (C > 0.02) {
+    let best = PIGMENT_LCH[0], bd = 999;
+    for (const p of PIGMENT_LCH) { const d = Math.abs(hueDiff(h, p[2])); if (d < bd) { bd = d; best = p; } }
+    h = (h + hueDiff(h, best[2]) * 0.45 + 360) % 360;
+  }
+  return made(fromOklch([L, C, h]));
+}
+/** Same hue, darker (for the shaded side). amt ≈ 0.05–0.15. */
+function darker(c, amt = 0.075) {
+  const [L, C, h] = rgbToOklch(hexToRgb(soften(c)));
+  return made(fromOklch([L - amt, Math.min(C * 1.12 + 0.008, 0.14), h + hueDiff(h, 40) * 0.08]));
+}
+function lighter(c, amt = 0.06) {
+  const [L, C, h] = rgbToOklch(hexToRgb(soften(c)));
+  return made(fromOklch([Math.min(0.97, L + amt), C * 0.85, h]));
+}
+// ink is not softened (it is the one dark)
+function inkColor(c) { if (!c || c === true) return PALETTE.ink; return PALETTE[c] || c; }
+
+/* ------------------------------------------------------------------ stroke font (Latin + Vietnamese) */
+// Units: baseline y=0, x-height −5, cap height −7, descender +2.6. Size s ⇒ 1 unit = s/10 px.
+// Stroke kinds: L polyline, C smooth spline, O ellipse arc (cx cy rx ry a0 a1, degrees, y down), D dot (x y).
+const GLYPHS = {
+  ' ': [2.6, ''],
+  a: [5, 'O 2 -2.5 2 2.5 -20 350;L 4 -5 4 -0.1'],
+  b: [4.8, 'L 0 -7.4 0 0;O 2 -2.5 2 2.5 190 550'],
+  c: [4.5, 'O 2.2 -2.5 2.2 2.5 -40 -322'],
+  d: [5, 'O 2 -2.5 2 2.5 -10 350;L 4 -7.4 4 -0.1'],
+  e: [4.7, 'C 0.2 -2.5 2.3 -2.6 4.2 -2.7 4.1 -3.9 3.3 -4.9 2.1 -5 0.8 -4.6 0.1 -3.1 0.3 -1.3 1.3 -0.2 2.6 0 3.8 -0.6'],
+  f: [3.4, 'C 3.4 -7.1 2.4 -7.4 1.6 -6.8 1.4 -5.6 1.4 0;L 0 -4.9 3 -4.9'],
+  g: [5, 'O 2 -2.5 2 2.5 -20 350;C 4 -5 4 0.8 3.4 2.2 2 2.6 0.5 2.1'],
+  h: [4.8, 'L 0 -7.4 0 0;C 0 -3 0.9 -4.7 2.3 -5 3.6 -4.5 4 -3 4 0'],
+  i: [1.4, 'L 0.4 -5 0.4 0;D 0.4 -6.6'],
+  ı: [1.4, 'L 0.4 -5 0.4 0'],
+  j: [2.4, 'C 1.6 -5 1.6 1.5 1.1 2.4 0 2.6 -0.7 2.1;D 1.6 -6.6'],
+  k: [4.3, 'L 0 -7.4 0 0;L 3.6 -5 0.2 -2.2 3.8 0'],
+  l: [1.9, 'C 0.3 -7.4 0.3 -1.2 0.6 -0.3 1.4 0'],
+  m: [6.8, 'L 0 -5 0 0;C 0 -3.2 0.7 -4.8 1.7 -5 2.7 -4.6 3 -3.3 3 0;C 3 -3.3 3.7 -4.8 4.7 -5 5.7 -4.6 6 -3.3 6 0'],
+  n: [4.8, 'L 0 -5 0 0;C 0 -3 0.9 -4.7 2.3 -5 3.6 -4.5 4 -3 4 0'],
+  o: [4.8, 'O 2.1 -2.5 2.1 2.5 -100 275'],
+  p: [4.8, 'L 0 -5 0 2.6;O 2 -2.5 2 2.5 190 550'],
+  q: [5, 'O 2 -2.5 2 2.5 -20 350;L 4 -5 4 2.6'],
+  r: [3.4, 'L 0 -5 0 0;C 0 -2.8 0.8 -4.6 2 -5 3.2 -4.8'],
+  s: [4.1, 'C 3.5 -4.4 2.5 -5 1.2 -4.9 0.4 -4.2 0.6 -3.2 1.8 -2.6 3 -2.1 3.5 -1.1 2.9 -0.2 1.6 0 0.2 -0.5'],
+  t: [3.2, 'C 1.2 -6.6 1.2 -1 1.7 -0.1 2.8 0;L 0 -4.9 2.8 -4.9'],
+  u: [4.8, 'C 0 -5 0 -1.9 0.6 -0.4 2 0 3.3 -0.5 4 -2.1;L 4 -5 4 0'],
+  v: [4.4, 'L 0 -5 2 0 4 -5'],
+  w: [6.4, 'L 0 -5 1.5 0 3 -4 4.5 0 6 -5'],
+  x: [4.4, 'L 0 -5 4 0;L 4 -5 0 0'],
+  y: [4.4, 'L 0 -5 2 -0.3;L 4 -5 1.2 2.6'],
+  z: [4.4, 'L 0 -5 4 -5 0 0 4.2 0'],
+  A: [5.4, 'L 0 0 2.5 -7 5 0;L 1 -2.6 4 -2.6'],
+  B: [4.8, 'L 0 0 0 -7;C 0 -7 2.6 -7 3.6 -6.2 3.6 -4.6 2.6 -3.8 0.1 -3.8;C 0.1 -3.8 3 -3.8 4.2 -2.8 4.2 -1 3 0 0 0'],
+  C: [6, 'O 3 -3.5 3 3.5 -40 -322'],
+  D: [5.4, 'L 0 0 0 -7;C 0 -7 2.5 -7 4.3 -5.6 4.9 -3.5 4.3 -1.4 2.5 0 0 0'],
+  E: [4.6, 'L 4 -7 0 -7 0 0 4 0;L 0 -3.6 3.2 -3.6'],
+  F: [4.4, 'L 4 -7 0 -7 0 0;L 0 -3.6 3.2 -3.6'],
+  G: [6.6, 'O 3 -3.5 3 3.5 -40 -358;L 3.6 -3.3 6 -3.3 6 -0.3'],
+  H: [5.4, 'L 0 -7 0 0;L 4.6 -7 4.6 0;L 0 -3.6 4.6 -3.6'],
+  I: [1.2, 'L 0.4 -7 0.4 0'],
+  J: [3.8, 'C 3 -7 3 -1.6 2.4 -0.3 1.4 0 0.3 -0.5 0 -1.4'],
+  K: [4.8, 'L 0 -7 0 0;L 4.2 -7 0.2 -3.2 4.4 0'],
+  L: [4.2, 'L 0 -7 0 0 3.8 0'],
+  M: [6.6, 'L 0 0 0.3 -7 3 -2.2 5.7 -7 6 0'],
+  N: [5.4, 'L 0 0 0 -7 4.6 0 4.6 -7'],
+  O: [6.6, 'O 3.2 -3.5 3.2 3.5 -100 275'],
+  P: [4.8, 'L 0 0 0 -7;C 0 -7 2.8 -7 4.1 -6 4.1 -4.4 2.8 -3.3 0.1 -3.3'],
+  Q: [6.6, 'O 3.2 -3.5 3.2 3.5 -100 275;L 3.6 -1.4 6.2 0.6'],
+  R: [5, 'L 0 0 0 -7;C 0 -7 2.8 -7 4.1 -6 4.1 -4.4 2.8 -3.3 0.1 -3.3;L 2 -3.3 4.4 0'],
+  S: [5, 'C 4.4 -6.2 3.4 -7 2 -7 0.6 -6.4 0.6 -5 1.8 -4 3.2 -3.4 4.4 -2.2 4 -0.6 2.4 0 0.2 -0.8'],
+  T: [5.4, 'L 0 -7 5 -7;L 2.5 -7 2.5 0'],
+  U: [5.6, 'C 0 -7 0 -2.2 0.8 -0.4 2.4 0 4 -0.4 4.8 -2.2 4.8 -7'],
+  V: [5.4, 'L 0 -7 2.5 0 5 -7'],
+  W: [7, 'L 0 -7 1.6 0 3.3 -5.2 5 0 6.6 -7'],
+  X: [5, 'L 0 -7 4.6 0;L 4.6 -7 0 0'],
+  Y: [5.2, 'L 0 -7 2.4 -3.4 4.8 -7;L 2.4 -3.4 2.4 0'],
+  Z: [5.2, 'L 0 -7 4.6 -7 0 0 4.8 0'],
+  0: [5, 'O 2.4 -3.5 2.4 3.5 -100 275'],
+  1: [3, 'L 0.4 -5.6 2 -7 2 0'],
+  2: [4.6, 'C 0.3 -5.6 1 -6.8 2.3 -7 3.6 -6.6 4 -5.3 3.4 -3.8 0 0;L 0 0 4.2 0'],
+  3: [4.6, 'C 0.3 -6.4 1.6 -7 3 -6.9 3.8 -6 3.4 -4.4 1.6 -3.8;C 1.6 -3.8 3.6 -3.4 4.2 -1.8 3.4 -0.3 1.8 0 0.2 -0.7'],
+  4: [4.8, 'L 3.2 0 3.2 -7 0 -2.2 4.4 -2.2'],
+  5: [4.6, 'L 4 -7 0.6 -7 0.3 -3.7;C 0.3 -3.7 1.5 -4.4 2.9 -4.3 4.1 -3.3 4.2 -1.6 3.2 -0.2 1.6 0 0 -0.6'],
+  6: [4.6, 'C 3.8 -6.8 2.4 -7 1 -6 0.2 -3.5 0.3 -1.4 1.5 -0.1 2.6 0 3.9 -0.8 4.1 -2.2 3.4 -3.7 2 -4 0.4 -3'],
+  7: [4.6, 'L 0 -7 4.2 -7 1.4 0'],
+  8: [4.6, 'O 2.2 -5.3 1.7 1.7 90 455;O 2.2 -1.8 2.1 1.8 -90 275'],
+  9: [4.6, 'C 4 -4 2.8 -3.2 1.2 -3.3 0.2 -4.6 0.6 -6.4 2 -7 3.4 -6.7 4 -5.2 4 -3 3.5 -1 2 0 0.6 -0.4'],
+  '.': [1.6, 'D 0.5 -0.35'],
+  ',': [1.6, 'C 0.7 -0.5 0.6 0.5 -0.1 1.4'],
+  ':': [1.6, 'D 0.5 -4;D 0.5 -0.35'],
+  ';': [1.6, 'D 0.6 -4;C 0.7 -0.5 0.6 0.5 -0.1 1.4'],
+  '!': [1.6, 'L 0.5 -7 0.5 -2.2;D 0.5 -0.35'],
+  '?': [4, 'C 0.2 -6 1.2 -7 2.6 -6.9 3.6 -5.8 3.2 -4.4 1.8 -3.4 1.8 -2;D 1.8 -0.35'],
+  '-': [3.4, 'L 0.2 -2.6 2.9 -2.6'],
+  '–': [4.6, 'L 0.2 -2.6 4.2 -2.6'],
+  '—': [6.6, 'L 0.2 -2.6 6.2 -2.6'],
+  "'": [1.2, 'L 0.5 -7.4 0.4 -5.6'],
+  '’': [1.6, 'C 0.7 -7.4 0.7 -6.4 0 -5.4'],
+  '‘': [1.6, 'C 0.6 -5.4 0 -6.4 0.6 -7.4'],
+  '"': [2.4, 'L 0.5 -7.4 0.4 -5.6;L 1.8 -7.4 1.7 -5.6'],
+  '“': [3, 'C 0.6 -5.4 0 -6.4 0.6 -7.4;C 2 -5.4 1.4 -6.4 2 -7.4'],
+  '”': [3, 'C 0.7 -7.4 0.7 -6.4 0 -5.4;C 2.1 -7.4 2.1 -6.4 1.4 -5.4'],
+  '(': [2.4, 'C 1.8 -7.6 0.4 -5.5 0.1 -2.5 0.4 0.4 1.8 2.2'],
+  ')': [2.4, 'C 0 -7.6 1.4 -5.5 1.7 -2.5 1.4 0.4 0 2.2'],
+  '/': [3.6, 'L 0 1 3.4 -7.4'],
+  '+': [4.4, 'L 0 -3 4 -3;L 2 -5 2 -1'],
+  '=': [4.2, 'L 0 -3.8 3.8 -3.8;L 0 -1.8 3.8 -1.8'],
+  '×': [4, 'L 0.2 -4.6 3.4 -1.4;L 3.4 -4.6 0.2 -1.4'],
+  '*': [3.8, 'L 1.7 -7 1.7 -3.6;L 0.2 -6.2 3.2 -4.4;L 3.2 -6.2 0.2 -4.4'],
+  '%': [5.6, 'L 0.4 0 4.8 -7;O 1.2 -5.6 1 1.3 0 365;O 4.1 -1.4 1 1.3 0 365'],
+  '&': [5, 'C 4.6 0 1.4 -3.6 0.8 -5 1.2 -6.6 2.4 -7 3.4 -6.2 3.2 -4.8 0.6 -2.6 0.4 -0.8 1.6 0 3 -0.4 4.6 -2.4'],
+  '#': [5.2, 'L 1.6 -7 1 0;L 3.8 -7 3.2 0;L 0.2 -4.8 4.8 -4.8;L 0 -2.2 4.6 -2.2'],
+  '°': [2.4, 'O 1.1 -6.2 0.9 0.9 0 365'],
+  '·': [1.6, 'D 0.5 -2.6'],
+  '→': [6.8, 'L 0 -2.6 6.2 -2.6;L 4.6 -4 6.2 -2.6 4.6 -1.2'],
+  '←': [6.8, 'L 6.2 -2.6 0 -2.6;L 1.6 -4 0 -2.6 1.6 -1.2'],
+  '↑': [4, 'L 2 0 2 -7;L 0.6 -5.4 2 -7 3.4 -5.4'],
+  '↓': [4, 'L 2 -7 2 0;L 0.6 -1.6 2 0 3.4 -1.6'],
+  'đ': [5.4, 'O 2 -2.5 2 2.5 -10 350;L 4 -7.4 4 -0.1;L 2.6 -6.3 5.2 -6.3'],
+  'Đ': [5.8, 'L 0.4 0 0.4 -7;C 0.4 -7 2.9 -7 4.7 -5.6 5.3 -3.5 4.7 -1.4 2.9 0 0.4 0;L -0.6 -3.5 2.2 -3.5'],
+  '$': [4.6, 'C 4 -5.8 3.2 -6.4 2 -6.4 0.8 -5.8 0.8 -4.6 2 -3.8 3.2 -3.2 4 -2.2 3.6 -0.8 2.2 -0.3 0.4 -0.9;L 2.2 -7.4 2.2 0.7'],
+};
+// mark x-centre overrides for bowls offset from the advance width
+const MARK_X = { a: 2, d: 2, q: 2, g: 2, o: 2.1, u: 2, y: 2.2, i: 0.4, ı: 0.4, e: 2.2, A: 2.5, O: 3.2, U: 2.4, I: 0.4, E: 2, Y: 2.4 };
+// where the horn (ơ ư) attaches
+const HORN_AT = { o: [3.7, -4.4], u: [4, -5], O: [5.6, -6.2], U: [4.8, -7] };
+// combining marks, drawn around (0,0) = mark anchor
+const MARKS = {
+  0x0301: { pos: 'above', h: 1.7, d: 'L -0.5 0 0.9 -1.7', dx: 0.35 },          // acute  sắc
+  0x0300: { pos: 'above', h: 1.7, d: 'L 0.5 0 -0.9 -1.7', dx: -0.2 },          // grave  huyền
+  0x0309: { pos: 'above', h: 2.1, d: 'C -0.6 -1.6 -0.1 -2.1 0.6 -1.9 0.6 -1.1 0 -0.6 0 -0.1', dx: 0.3 }, // hook  hỏi
+  0x0303: { pos: 'above', h: 1.1, d: 'C -1.4 -0.2 -0.9 -1 -0.3 -0.9 0.3 -0.3 0.9 -0.2 1.4 -1', dx: 0 },  // tilde  ngã
+  0x0323: { pos: 'below', h: 1.2, d: 'D 0 0.6', dx: 0 },                        // dot below  nặng
+  0x0302: { pos: 'above', h: 1.5, d: 'L -1.3 0 0 -1.5 1.3 0', dx: 0 },          // circumflex  â ê ô
+  0x0306: { pos: 'above', h: 1.3, d: 'C -1.3 -1.3 -0.7 -0.2 0 0 0.7 -0.2 1.3 -1.3', dx: 0 }, // breve  ă
+  0x0308: { pos: 'above', h: 0.6, d: 'D -0.9 -0.3;D 0.9 -0.3', dx: 0 },          // diaeresis
+  0x031B: { pos: 'horn' },                                                       // horn  ơ ư
+};
+const HORN_D = 'C 0 0 0.9 -0.3 1.2 -1.1 0.9 -1.8';
+
+function parseStrokes(def) {
+  if (!def) return [];
+  return def.split(';').map((s) => {
+    const parts = s.trim().split(/\s+/);
+    const kind = parts[0];
+    const nums = parts.slice(1).map(Number);
+    if (kind === 'O') {
+      const [cx, cy, rx, ry, a0, a1] = nums;
+      const n = Math.max(8, Math.ceil(Math.abs(a1 - a0) / 12));
+      const pts = [];
+      for (let i = 0; i <= n; i++) { const a = ((a0 + ((a1 - a0) * i) / n) * Math.PI) / 180; pts.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]); }
+      return { kind: 'L', pts };
+    }
+    const pts = [];
+    for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
+    return { kind, pts };
+  });
+}
+const GLYPH_CACHE = {};
+function glyph(ch) {
+  if (GLYPH_CACHE[ch]) return GLYPH_CACHE[ch];
+  const g = GLYPHS[ch];
+  if (!g) return null;
+  return (GLYPH_CACHE[ch] = { w: g[0], strokes: parseStrokes(g[1]) });
+}
+
+/* ------------------------------------------------------------------ the kit */
+
+const WEIGHTS = { outline: 2.3, detail: 1.6, fine: 1.1, hatch: 0.9, bold: 3.2 };
+const LIGHT = [-Math.SQRT1_2, -Math.SQRT1_2]; // light comes from the top-left
+
+export function createKit(opts = {}) {
+  const W = opts.width || 1000, H = opts.height || 1000;
+  const seed = opts.seed == null ? 1 : opts.seed;
+  const t = opts.t || 0;
+
+  const body = [];
+  const defs = [];
+  let idn = 0;
+  let scope = 'root';
+  const counters = { root: 0 };
+  let M = [1, 0, 0, 1, 0, 0]; // affine: x' = a x + c y + e, y' = b x + d y + f
+  let groupScale = 1;
+
+  function rng() {
+    counters[scope] = (counters[scope] || 0) + 1;
+    return mulberry32(hashStr(seed + '|' + scope + '|' + counters[scope]));
+  }
+  // composition randomness (shape irregularity) must NOT change with the seed, or "different seed ⇒ same composition" breaks
+  // keep it tied to call identity only
+  function shapeRng() {
+    counters[scope + '#s'] = (counters[scope + '#s'] || 0) + 1;
+    return mulberry32(hashStr('shape|' + scope + '|' + counters[scope + '#s']));
+  }
+  const tx = (p) => [M[0] * p[0] + M[2] * p[1] + M[4], M[1] * p[0] + M[3] * p[1] + M[5]];
+  const txAll = (P) => P.map(tx);
+
+  /* -------------------- ink */
+
+  function inkPoly(pts, w, r, o = {}) {
+    let P = resample(pts, 2.5);
+    let L = polyLen(P);
+    if (L < 1.2) {
+      const c = pts[0], rr = Math.max(w * 0.75, 1);
+      return blobPath(c, rr, r);
+    }
+    const wob = o.wobble == null ? 1 : o.wobble;
+    // overshoot both ends
+    const os = o.overshoot == null ? 1 : o.overshoot;
+    const k0 = Math.min(1, L / 40);
+    const e0 = os * (0.5 + r() * 2.2) * k0, e1 = os * (0.8 + r() * 3.2) * k0;
+    const a = P[0], a2 = P[Math.min(3, P.length - 1)];
+    const z = P[P.length - 1], z2 = P[Math.max(0, P.length - 4)];
+    const d0 = norm([a[0] - a2[0], a[1] - a2[1]]), d1 = norm([z[0] - z2[0], z[1] - z2[1]]);
+    const pre = [], post = [];
+    for (let e = e0; e > 0.5; e -= 2.5) pre.push([a[0] + d0[0] * e, a[1] + d0[1] * e]);
+    for (let e = 2.5; e <= e1 + 0.01; e += 2.5) post.push([z[0] + d1[0] * e, z[1] + d1[1] * e]);
+    P = pre.concat(P, post);
+    // the hand: a damped spring chasing the points (rounds corners, runs on)
+    const stiff = clamp((0.34 + 0.5 * (1 - Math.min(1, L / 120))) * (o.stiff || 1), 0.2, 0.92);
+    const damp = 0.48;
+    let px = P[0][0], py = P[0][1], vx = 0, vy = 0;
+    const F = [[px, py]];
+    for (let i = 1; i < P.length; i++) {
+      vx = vx * damp + (P[i][0] - px) * stiff; vy = vy * damp + (P[i][1] - py) * stiff;
+      px += vx; py += vy; F.push([px, py]);
+    }
+    for (let j = 0; j < 3; j++) {
+      const q = P[P.length - 1];
+      vx = vx * damp + (q[0] - px) * stiff; vy = vy * damp + (q[1] - py) * stiff;
+      px += vx; py += vy; F.push([px, py]);
+    }
+    const S = resample(F, 2);
+    const n = S.length;
+    if (n < 2) return blobPath(pts[0], w, r);
+    const s = [0];
+    for (let i = 1; i < n; i++) s.push(s[i - 1] + dist(S[i - 1], S[i]));
+    const T = s[n - 1] || 1;
+    // wobble: slow bow + mid wobble + fine tremor
+    const A1 = wob * (0.7 + r() * 1.5) * Math.min(1, T / 200), l1 = Math.max(240, T * (1 + r() * 1.5)), f1 = r() * TAU;
+    const A2 = wob * (0.3 + r() * 0.35) * Math.min(1, T / 50), l2 = 45 + r() * 60, f2 = r() * TAU;
+    const A3 = wob * 0.16, l3 = 9 + r() * 7, f3 = r() * TAU;
+    const lw = 30 + r() * 50, fw = r() * TAU, fw2 = r() * TAU;
+    const inLen = Math.min(7, T * 0.25), outLen = Math.min(26, T * 0.4);
+    const L1 = [], R1 = [];
+    let hw0 = 0, hwN = 0, t0 = [1, 0], tN = [1, 0];
+    for (let i = 0; i < n; i++) {
+      const pa = S[Math.max(0, i - 1)], pb = S[Math.min(n - 1, i + 1)];
+      const tg = norm([pb[0] - pa[0], pb[1] - pa[1]]);
+      const nm = [-tg[1], tg[0]];
+      const si = s[i];
+      const off = A1 * Math.sin((TAU * si) / l1 + f1) + A2 * Math.sin((TAU * si) / l2 + f2) + A3 * Math.sin((TAU * si) / l3 + f3);
+      const pin = 0.45 + 0.55 * smooth(si / (inLen || 1));
+      const swell = 1 + 0.2 * Math.exp(-si / (T * 0.15 + 6));
+      const pout = 1 - 0.62 * smooth((si - (T - outLen)) / (outLen || 1));
+      const noise = 1 + 0.12 * Math.sin((TAU * si) / lw + fw) + 0.06 * Math.sin((TAU * si) / (lw * 0.37) + fw2);
+      const hw = (w / 2) * pin * swell * pout * noise * (o.pressure || 1);
+      const cx = S[i][0] + nm[0] * off, cy = S[i][1] + nm[1] * off;
+      L1.push([cx + nm[0] * hw, cy + nm[1] * hw]);
+      R1.push([cx - nm[0] * hw, cy - nm[1] * hw]);
+      if (i === 0) { hw0 = hw; t0 = tg; }
+      if (i === n - 1) { hwN = hw; tN = tg; }
+    }
+    const c0 = [(L1[0][0] + R1[0][0]) / 2 - t0[0] * hw0 * 0.9, (L1[0][1] + R1[0][1]) / 2 - t0[1] * hw0 * 0.9];
+    const cN = [(L1[n - 1][0] + R1[n - 1][0]) / 2 + tN[0] * hwN * 0.9, (L1[n - 1][1] + R1[n - 1][1]) / 2 + tN[1] * hwN * 0.9];
+    const ring = [c0, ...L1, cN, ...R1.reverse()];
+    return 'M' + ring.map((p) => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + 'Z';
+  }
+  function blobPath(c, rr, r) {
+    const pts = [];
+    const ph = r() * TAU;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * TAU;
+      const q = rr * (1 + 0.12 * Math.sin(a * 2 + ph));
+      pts.push([c[0] + Math.cos(a) * q, c[1] + Math.sin(a) * q]);
+    }
+    return 'M' + pts.map((p) => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + 'Z';
+  }
+  // open a closed loop at a random point; overrun past the start (or stop just short)
+  function openLoop(P, r) {
+    const Q = resample(P.concat([P[0]]), 2.5);
+    Q.pop();
+    const n = Q.length;
+    if (n < 3) return Q;
+    const start = Math.floor(r() * n);
+    const rot = Q.slice(start).concat(Q.slice(0, start));
+    const per = polyLen(Q.concat([Q[0]]));
+    const over = r() < 0.78 ? (3 + r() * 9) * Math.min(1, per / 120) : -(0.5 + r() * 2.5);
+    if (over > 0) {
+      let acc = 0, i = 0;
+      rot.push(rot[0]);
+      while (acc < over && i < n - 1) { acc += 2.5; rot.push(rot[(i + 1) % n]); i++; }
+    } else {
+      let drop = Math.round(-over / 2.5);
+      while (drop-- > 0 && rot.length > 4) rot.pop();
+      rot.push(rot[0]);
+      rot.pop();
+    }
+    return rot;
+  }
+  function weightOf(wt) { return typeof wt === 'number' ? wt : WEIGHTS[wt || 'outline'] || WEIGHTS.outline; }
+  function emitInk(sheetPts, closed, o = {}) {
+    const r = rng();
+    const w = weightOf(o.weight);
+    const pts = closed ? openLoop(sheetPts, r) : sheetPts;
+    const d = inkPoly(pts, w, r, { overshoot: closed ? 0.35 : o.overshoot, wobble: o.wobble, stiff: o.stiff, pressure: o.pressure });
+    body.push(`<path d="${d}" fill="${inkColor(o.ink)}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}/>`);
+  }
+
+  /* -------------------- wash */
+
+  // flat marker colour (no texture): the hand-made feel comes from the uneven, off-register edge
+  function patternFor(color) { return soften(color); }
+  function washPoly(sheetPts, r, o = {}) {
+    // gentle wobble, inset that comes and goes (paper shows at the edge), whole thing off-register
+    let P = resample(sheetPts.concat([sheetPts[0]]), 4);
+    P.pop();
+    if (P.length < 3) P = sheetPts;
+    const area = Math.abs(signedArea(P));
+    const size = Math.sqrt(area);
+    const sgn = signedArea(P) > 0 ? 1 : -1;
+    const k = Math.min(1, size / 60);
+    const reg = o.register == null ? 1 : o.register;
+    const ang = r() * TAU, mag = (1.1 + r() * 0.9) * k * reg;
+    const dx = Math.cos(ang) * mag, dy = Math.sin(ang) * mag;
+    const per = polyLen(P.concat([P[0]]));
+    const l1 = 60 + r() * 90, f1 = r() * TAU, f2 = r() * TAU;
+    const n = P.length;
+    const out = [];
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const a = P[(i - 1 + n) % n], b = P[(i + 1) % n];
+      const tg = norm([b[0] - a[0], b[1] - a[1]]);
+      const nm = [tg[1] * sgn, -tg[0] * sgn]; // inward
+      if (i > 0) s += dist(P[i - 1], P[i]);
+      const inset = k * (0.9 + 1.3 * Math.sin((TAU * s) / l1 + f1) + 0.4 * Math.sin((TAU * s) / (l1 * 0.31) + f2)) * (o.inset == null ? 1 : o.inset);
+      out.push([P[i][0] + nm[0] * inset + dx, P[i][1] + nm[1] * inset + dy]);
+    }
+    return out;
+  }
+  const pathD = (P, close = true) => 'M' + P.map((p) => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + (close ? 'Z' : '');
+
+  /* -------------------- shapes */
+
+  function mkShape(pts, closed = true, extra = {}) {
+    const s = { pts, closed, ...extra };
+    s.bbox = bboxOf(pts);
+    return s;
+  }
+  const geo = {
+    poly: (points) => mkShape(points.map((p) => [p[0], p[1]]), true),
+    path: (points) => mkShape(points.map((p) => [p[0], p[1]]), false),
+    spline: (points, closed = false) => mkShape(catmull(points, closed), closed),
+    ellipse(cx, cy, rx, ry = rx, o = {}) {
+      const r = shapeRng();
+      const per = TAU * Math.sqrt((rx * rx + ry * ry) / 2);
+      const n = Math.max(18, Math.ceil(per / 3));
+      const irr = o.irregular == null ? 0.025 : o.irregular;
+      const ph = r() * TAU, ph2 = r() * TAU;
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU;
+        const q = 1 + irr * (Math.sin(a * 2 + ph) + 0.5 * Math.sin(a * 3 + ph2));
+        pts.push([cx + Math.cos(a) * rx * q, cy + Math.sin(a) * ry * q]);
+      }
+      return mkShape(pts, true, { cx, cy, rx, ry });
+    },
+    circle: (cx, cy, r, o) => geo.ellipse(cx, cy, r, r, o),
+    rect: (x, y, w, h) => mkShape([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], true),
+    roundRect(x, y, w, h, rad = Math.min(w, h) * 0.15) {
+      rad = Math.min(rad, w / 2, h / 2);
+      const pts = [];
+      const corner = (cx, cy, a0) => { for (let i = 0; i <= 6; i++) { const a = ((a0 + i * 15) * Math.PI) / 180; pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]); } };
+      corner(x + w - rad, y + rad, -90); corner(x + w - rad, y + h - rad, 0); corner(x + rad, y + h - rad, 90); corner(x + rad, y + rad, 180);
+      return mkShape(pts, true);
+    },
+    blob(cx, cy, r, o = {}) {
+      const rnd = shapeRng();
+      const rx = o.rx || r, ry = o.ry || r * (o.squash || 1);
+      const bumps = o.bumps || 0, bump = o.bump == null ? 0.12 : o.bump;
+      const irr = o.irregular == null ? 0.05 : o.irregular;
+      const ph = rnd() * TAU, ph2 = rnd() * TAU, rot = o.bumps ? rnd() * TAU : 0;
+      const per = TAU * Math.max(rx, ry);
+      const n = Math.max(24, Math.ceil(per / 2.5));
+      const pts = [];
+      const bv = [];
+      for (let i = 0; i < bumps; i++) bv.push(0.75 + rnd() * 0.5);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU;
+        let q = 1 + irr * (Math.sin(a * 2 + ph) * 0.7 + Math.sin(a * 3 + ph2) * 0.5);
+        if (bumps) {
+          const u = ((a + rot) / TAU) * bumps;
+          const j = Math.floor(u) % bumps;
+          q += bump * bv[(j + bumps) % bumps] * (Math.abs(Math.sin(Math.PI * u)) - 0.64);
+        }
+        pts.push([cx + Math.cos(a) * rx * q, cy + Math.sin(a) * ry * q]);
+      }
+      return mkShape(pts, true, { cx, cy, rx, ry });
+    },
+    arc(cx, cy, rx, ry, a0, a1) {
+      if (a1 === undefined) { a1 = a0; a0 = ry; ry = rx; }
+      const span = Math.abs(a1 - a0);
+      const n = Math.max(6, Math.ceil(((span / 360) * TAU * Math.max(rx, ry)) / 3));
+      const pts = [];
+      for (let i = 0; i <= n; i++) { const a = ((a0 + ((a1 - a0) * i) / n) * Math.PI) / 180; pts.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); }
+      return mkShape(pts, false);
+    },
+    // a tube along a centreline: handles, stems, tails, arms, branches. width number or [start, end]
+    tube(points, width, o = {}) {
+      const C = resample(catmull(points, false), 2);
+      const n = C.length;
+      const [w0, w1] = Array.isArray(width) ? width : [width, width];
+      const Ls = [], Rs = [];
+      const S = polyLen(C);
+      let s = 0;
+      for (let i = 0; i < n; i++) {
+        if (i) s += dist(C[i - 1], C[i]);
+        const a = C[Math.max(0, i - 1)], b = C[Math.min(n - 1, i + 1)];
+        const tg = norm([b[0] - a[0], b[1] - a[1]]);
+        const hw = lerp(w0, w1, S ? s / S : 0) / 2;
+        Ls.push([C[i][0] - tg[1] * hw, C[i][1] + tg[0] * hw]);
+        Rs.push([C[i][0] + tg[1] * hw, C[i][1] - tg[0] * hw]);
+      }
+      const cap = (c, from, hw, tgSign, tg) => {
+        const out = [];
+        const ang = Math.atan2(from[1] - c[1], from[0] - c[0]);
+        for (let j = 1; j < 8; j++) { const a = ang + (tgSign * Math.PI * j) / 8; out.push([c[0] + Math.cos(a) * hw, c[1] + Math.sin(a) * hw]); }
+        return out;
+      };
+      const round = o.cap !== 'flat';
+      const pts = [...Ls];
+      if (round) pts.push(...cap(C[n - 1], Ls[n - 1], w1 / 2, -1));
+      pts.push(...Rs.reverse());
+      if (round) pts.push(...cap(C[0], Rs[Rs.length - 1], w0 / 2, -1));
+      return mkShape(pts, true, { centre: C });
+    },
+  };
+
+  /* -------------------- drawing */
+
+  function shapeOf(x) { return x && x.pts ? x : null; }
+
+  function fill(shape, color, o = {}) {
+    shape = shapeOf(shape);
+    if (!shape || !color) return;
+    const r = rng();
+    const P = washPoly(txAll(shape.pts), r, o);
+    body.push(`<path d="${pathD(P)}" fill="${patternFor(color)}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}/>`);
+    return P;
+  }
+  function ink(shape, o = {}) {
+    shape = shapeOf(shape);
+    if (!shape) return;
+    emitInk(txAll(shape.pts), o.closed == null ? shape.closed : o.closed, o);
+  }
+  // the region of the shape facing away from the light (bottom-right crescent), as a translated copy to subtract
+  function shadeOffset(sheetPts, amount) {
+    const bb = bboxOf(sheetPts);
+    const d = Math.min(bb.w, bb.h) * (amount == null ? 0.2 : amount);
+    return [LIGHT[0] * d, LIGHT[1] * d];
+  }
+  function shade(shape, color, o = {}) {
+    shape = shapeOf(shape);
+    if (!shape || !color) return;
+    const r = rng();
+    const base = o.clip || washPoly(txAll(shape.pts), r, { register: 0.5, inset: 0.6 });
+    const off = o.offset || shadeOffset(base, o.amount);
+    const moved = washPoly(base.map((p) => [p[0] + off[0], p[1] + off[1]]), r, { register: 0.3, inset: -1.2 });
+    const id = (opts.idPrefix || '') + 'c' + ++idn;
+    defs.push(`<clipPath id="${id}"><path d="${pathD(base)}"/></clipPath>`);
+    body.push(`<path clip-path="url(#${id})" fill-rule="evenodd" d="${pathD(base)}${pathD(moved.slice().reverse())}" fill="${patternFor(o.raw ? color : darker(color, o.depth))}"/>`);
+  }
+  function hatch(shape, o = {}) {
+    shape = shapeOf(shape);
+    if (!shape) return;
+    const r = rng();
+    const P = txAll(shape.pts);
+    const ang = ((o.angle == null ? -45 : o.angle) * Math.PI) / 180; // -45: lines rise to the right "/"
+    const d = [Math.cos(ang), Math.sin(ang)];
+    const nrm = [-d[1], d[0]];
+    const gap = o.spacing || 7;
+    const bb = bboxOf(P);
+    const c = [bb.cx, bb.cy];
+    const R = Math.hypot(bb.w, bb.h) / 2 + 2;
+    const region = o.region || 'shade';
+    let sub = null;
+    if (region === 'shade') { const off = o.offset || shadeOffset(P, o.amount); sub = P.map((p) => [p[0] + off[0], p[1] + off[1]]); }
+    const inset = o.inset == null ? 2.5 : o.inset;
+    const w = weightOf(o.weight || 'hatch');
+    const ds = [];
+    for (let k = -R; k <= R; k += gap) {
+      const kk = k + (r() - 0.5) * gap * 0.35;
+      const o0 = [c[0] + nrm[0] * kk, c[1] + nrm[1] * kk];
+      let iv = lineIntervals(P, o0, d);
+      if (sub) iv = subtractIntervals(iv, lineIntervals(sub, o0, d));
+      for (const [a0, a1] of iv) {
+        const s0 = a0 + inset + r() * 2.5, s1 = a1 - inset - r() * 3;
+        if (s1 - s0 < 3) continue;
+        const pts = [[o0[0] + d[0] * s0, o0[1] + d[1] * s0], [o0[0] + d[0] * s1, o0[1] + d[1] * s1]];
+        const rr = rng();
+        ds.push(inkPoly(pts, w, rr, { overshoot: 0.2, wobble: 0.5, stiff: 1.5 }));
+      }
+    }
+    if (ds.length) body.push(`<path d="${ds.join('')}" fill="${inkColor(o.ink)}"${o.opacity != null ? ` opacity="${o.opacity}"` : ` opacity="0.85"`}/>`);
+  }
+
+  /** Draw a shape: wash (+ shaded side) (+ hatching) then ink. */
+  function draw(shape, o = {}) {
+    shape = shapeOf(shape);
+    if (!shape) return shape;
+    if (shape.closed && o.fill) {
+      const P = fill(shape, o.fill, o);
+      if (o.shade) shade(shape, o.fill, { clip: P, amount: typeof o.shade === 'number' ? o.shade : undefined, depth: o.shadeDepth });
+    }
+    if (o.hatch) hatch(shape, typeof o.hatch === 'object' ? o.hatch : {});
+    if (o.ink !== false) ink(shape, o);
+    return shape;
+  }
+
+  /* -------------------- text */
+
+  function textWidth(str, size = 22, o = {}) {
+    const u = size / 10, tr = o.tracking == null ? 0.7 : o.tracking;
+    let w = 0;
+    for (const ch of str.normalize('NFD')) {
+      const cp = ch.codePointAt(0);
+      if (MARKS[cp]) continue;
+      const g = glyph(ch) || glyph('?');
+      w += (g.w + tr) * u;
+    }
+    return Math.max(0, w - tr * u);
+  }
+  function text(str, x, y, o = {}) {
+    const size = o.size || 22, u = size / 10;
+    const lh = (o.lineHeight || 1.45) * size;
+    const lines = String(str).split('\n');
+    const w = weightOf(o.weight || Math.max(1.0, 0.55 + size * 0.036));
+    const color = inkColor(o.ink);
+    const tr = o.tracking == null ? 0.7 : o.tracking;
+    const r = rng();
+    const ds = [];
+    let maxW = 0;
+    lines.forEach((line, li) => {
+      const lw = textWidth(line, size, o);
+      maxW = Math.max(maxW, lw);
+      let cx = o.align === 'right' ? x - lw : o.align === 'center' ? x - lw / 2 : x;
+      const by = y + li * lh;
+      const chars = [...line.normalize('NFD')];
+      for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i];
+        let g = glyph(ch);
+        const marks = [];
+        while (i + 1 < chars.length && MARKS[chars[i + 1].codePointAt(0)]) marks.push(chars[++i].codePointAt(0));
+        if (!g) g = glyph('?');
+        if (marks.length && (ch === 'i' || ch === 'j') && marks.some((m) => MARKS[m].pos === 'above')) g = glyph('ı');
+        const jy = (r() - 0.5) * 0.35, rot = (r() - 0.5) * 0.06;
+        const cosr = Math.cos(rot), sinr = Math.sin(rot);
+        const ox = cx, oy = by;
+        const place = (p) => { const X = p[0], Y = p[1] + jy; return tx([ox + (X * cosr - Y * sinr) * u, oy + (X * sinr + Y * cosr) * u]); };
+        const strokes = g.strokes.slice();
+        // marks
+        const upper = ch !== ch.toLowerCase();
+        let top = upper ? -7 : ch === 'ı' || 'aceimnorsuvwxzy'.includes(ch) ? -5 : -7.4;
+        const mx = MARK_X[ch] != null ? MARK_X[ch] : (g.w - 0.6) / 2;
+        let stacked = 0;
+        for (const m of marks) {
+          const mk = MARKS[m];
+          if (mk.pos === 'horn') {
+            const at = HORN_AT[ch] || [g.w - 0.6, top + 0.6];
+            strokes.push(...parseStrokes(HORN_D).map((s) => ({ kind: s.kind, pts: s.pts.map((p) => [p[0] + at[0], p[1] + at[1]]) })));
+            continue;
+          }
+          if (mk.pos === 'below') {
+            strokes.push(...parseStrokes(mk.d).map((s) => ({ kind: s.kind, pts: s.pts.map((p) => [p[0] + mx, p[1] + 0.9]) })));
+            continue;
+          }
+          const gap = upper ? 0.9 : 1.1;
+          const baseY = top - gap;
+          const dx = stacked ? mk.dx + 0.6 : 0;
+          strokes.push(...parseStrokes(mk.d).map((s) => ({ kind: s.kind, pts: s.pts.map((p) => [p[0] + mx + dx, p[1] + baseY]) })));
+          top = baseY - mk.h + 0.2;
+          stacked++;
+        }
+        for (const s of strokes) {
+          if (s.kind === 'D') { const c = place(s.pts[0]); ds.push(blobPath(c, w * 0.85, r)); continue; }
+          const pts = s.kind === 'C' ? catmull(s.pts, false, 0.3) : s.pts;
+          ds.push(inkPoly(pts.map(place), w, rng(), { overshoot: 0.25, wobble: 0.22, stiff: 2.2, pressure: 1 }));
+        }
+        cx += (g.w + tr) * u;
+      }
+    });
+    if (ds.length) body.push(`<path d="${ds.join('')}" fill="${color}"/>`);
+    const capH = 0.7 * size;
+    const x0 = o.align === 'right' ? x - maxW : o.align === 'center' ? x - maxW / 2 : x;
+    return { x: x0, y: y - capH, w: maxW, h: capH + (lines.length - 1) * lh + 0.26 * size };
+  }
+  function title(str, o = {}) {
+    const x = o.x == null ? 60 : o.x, y = o.y == null ? 96 : o.y;
+    const size = o.size || 50;
+    const b = text(str, x, y, { size, tracking: 0.35, weight: o.weight });
+    if (o.sub) text(o.sub, x + 2, y + size * 0.62, { size: o.subSize || 21, tracking: 1.0 });
+    return b;
+  }
+  /** Margin note with a hand-drawn leader line to a point on the drawing. */
+  function label(str, o = {}) {
+    const size = o.size || 21;
+    const b = text(str, o.x, o.y, { size, align: o.align, tracking: o.tracking == null ? 0.9 : o.tracking });
+    if (o.to) {
+      const T = o.to;
+      const cands = [
+        [b.x - 9, b.y + b.h * 0.42], [b.x + b.w + 9, b.y + b.h * 0.42],
+        [b.x + b.w / 2, b.y + b.h + 8], [b.x + b.w / 2, b.y - 9],
+      ];
+      let best = cands[0], bd = Infinity;
+      for (const c of cands) { const d = dist(c, T); if (d < bd) { bd = d; best = c; } }
+      const L = dist(best, T);
+      const nx = -(T[1] - best[1]) / L, ny = (T[0] - best[0]) / L;
+      const bend = (o.bend == null ? 0.1 : o.bend) * L;
+      const mid = [(best[0] + T[0]) / 2 + nx * bend, (best[1] + T[1]) / 2 + ny * bend];
+      const end = [T[0] - ((T[0] - mid[0]) / dist(mid, T)) * 5, T[1] - ((T[1] - mid[1]) / dist(mid, T)) * 5];
+      const pts = catmull([best, mid, end], false);
+      emitInk(txAll(pts), false, { weight: 'fine', overshoot: 0.3 });
+      const r = rng();
+      body.push(`<path d="${blobPath(tx(T), 2.6, r)}" fill="${PALETTE.ink}"/>`);
+    }
+    return b;
+  }
+
+  /* -------------------- groups */
+
+  function group(o, fn) {
+    const prev = M, prevS = groupScale;
+    const s = o.scale == null ? 1 : o.scale;
+    const sx = (o.sx == null ? s : o.sx) * (o.flipX ? -1 : 1), sy = o.sy == null ? s : o.sy;
+    const a = ((o.rotate || 0) * Math.PI) / 180;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    // local = T(x,y) · R · S
+    const L = [ca * sx, sa * sx, -sa * sy, ca * sy, o.x || 0, o.y || 0];
+    M = [
+      prev[0] * L[0] + prev[2] * L[1], prev[1] * L[0] + prev[3] * L[1],
+      prev[0] * L[2] + prev[2] * L[3], prev[1] * L[2] + prev[3] * L[3],
+      prev[0] * L[4] + prev[2] * L[5] + prev[4], prev[1] * L[4] + prev[3] * L[5] + prev[5],
+    ];
+    groupScale = prevS * Math.abs(s);
+    try { return fn(); } finally { M = prev; groupScale = prevS; }
+  }
+  /** Give a part its own random stream, so editing one part does not re-roll the wobble of every later part. */
+  function scoped(name, fn) {
+    const prev = scope;
+    scope = prev + '/' + name;
+    try { return fn(); } finally { scope = prev; }
+  }
+
+  /* -------------------- convenience primitives (geometry + draw) */
+
+  const k = {
+    W, H, width: W, height: H, cx: W / 2, cy: H / 2, t, seed,
+    palette: PALETTE, weights: WEIGHTS,
+    soften, darker, lighter,
+    geo,
+    draw, fill, ink, shade, hatch,
+    group, scope: scoped,
+    toSheet: (x, y) => tx([x, y]),
+    rand(a = 0, b = 1) { return lerp(a, b, shapeRng()()); },
+    pick(arr) { return arr[Math.floor(shapeRng()() * arr.length)]; },
+    lerp, clamp,
+
+    line(...args) {
+      let pts, o;
+      if (typeof args[0] === 'number') { pts = [[args[0], args[1]], [args[2], args[3]]]; o = args[4] || {}; }
+      else { pts = args[0]; o = args[1] || {}; }
+      return draw(geo.path(pts), { weight: 'outline', ...o });
+    },
+    spline(points, o = {}) { return draw(geo.spline(points, !!o.closed), o); },
+    poly(points, o = {}) { return draw(geo.poly(points), o); },
+    rect(x, y, w, h, o = {}) { return draw(geo.rect(x, y, w, h), o); },
+    roundRect(x, y, w, h, rad, o = {}) {
+      if (typeof rad === 'object') { o = rad; rad = undefined; }
+      return draw(geo.roundRect(x, y, w, h, rad), o);
+    },
+    ellipse(cx, cy, rx, ry, o = {}) { return draw(geo.ellipse(cx, cy, rx, ry, o), o); },
+    circle(cx, cy, r, o = {}) { return draw(geo.ellipse(cx, cy, r, r, o), o); },
+    blob(cx, cy, r, o = {}) { return draw(geo.blob(cx, cy, r, o), o); },
+    arc(cx, cy, rx, ry, a0, a1, o = {}) {
+      if (typeof a1 === 'object' || a1 === undefined) { o = a1 || {}; a1 = a0; a0 = ry; ry = rx; }
+      return draw(geo.arc(cx, cy, rx, ry, a0, a1), { weight: 'detail', ...o });
+    },
+    tube(points, width, o = {}) { return draw(geo.tube(points, width, o), o); },
+    dot(x, y, r = 3, o = {}) {
+      const rr = rng();
+      body.push(`<path d="${blobPath(tx([x, y]), r * groupScale, rr)}" fill="${o.fill ? soften(o.fill) : inkColor(o.ink)}"/>`);
+    },
+
+    /**
+     * Symmetric silhouette from a half-profile (cups, pots, vases, bottles, bowls).
+     * profile: [[halfWidth, y], ...] from top to bottom, y relative to `y`. Add 'c' as a 3rd item for a sharp corner.
+     */
+    turned(profile, o = {}) {
+      const cx = o.cx || 0, y0 = o.y || 0;
+      const right = profile.map((p) => [cx + p[0], y0 + p[1], p[2]]);
+      const left = profile.slice().reverse().map((p) => [cx - p[0], y0 + p[1], p[2]]);
+      // the two ends are corners by default (a flat top and base)
+      right[0][2] = right[0][2] || 'c'; right[right.length - 1][2] = right[right.length - 1][2] || 'c';
+      left[0][2] = left[0][2] || 'c'; left[left.length - 1][2] = left[left.length - 1][2] || 'c';
+      const shape = geo.spline(right.concat(left), true);
+      const top = profile[0], bot = profile[profile.length - 1];
+      let widest = profile[0];
+      for (const p of profile) if (p[0] > widest[0]) widest = p;
+      const info = {
+        shape,
+        top: y0 + top[1], bottom: y0 + bot[1], cx,
+        rim: { cx, y: y0 + top[1], rx: top[0], ry: top[0] * (o.rimRatio || 0.17) },
+        base: { cx, y: y0 + bot[1], rx: bot[0] },
+        widest: { y: y0 + widest[1], hw: widest[0] },
+        halfWidthAt(yy) {
+          const ry = yy - y0;
+          for (let i = 1; i < profile.length; i++) {
+            const a = profile[i - 1], b = profile[i];
+            if ((ry >= a[1] && ry <= b[1]) || (ry <= a[1] && ry >= b[1])) return lerp(a[0], b[0], (ry - a[1]) / (b[1] - a[1] || 1));
+          }
+          return 0;
+        },
+      };
+      if (o.draw !== false) {
+        draw(shape, { fill: o.fill, shade: o.shade == null ? true : o.shade, hatch: o.hatch, ink: o.ink, weight: o.weight });
+        if (o.rim) {
+          const R = info.rim;
+          const s = geo.ellipse(R.cx, R.y, R.rx, R.ry, { irregular: 0.01 });
+          draw(s, { fill: o.inside || darker(o.fill || 'stone', 0.14), weight: 'detail' });
+        }
+      }
+      return info;
+    },
+
+    /** Soft ground shadow: a flat wash ellipse, no outline, a few ground flicks. */
+    shadow(cx, cy, rx, ry, o = {}) {
+      ry = ry || rx * 0.16;
+      const s = geo.ellipse(cx, cy, rx, ry, { irregular: 0.04 });
+      fill(s, o.color || 'shadow', { opacity: o.opacity == null ? 0.9 : o.opacity, inset: 0.3 });
+      if (o.lines !== false) {
+        const r = shapeRng();
+        const n = o.lines || 3;
+        for (let i = 0; i < n; i++) {
+          const yy = cy + ry * (0.15 + i * 0.32);
+          const half = rx * (0.92 - i * 0.22) * (0.9 + r() * 0.15);
+          const x0 = cx + (r() - 0.2) * rx * 0.25;
+          k.line(x0 - half * 0.15, yy, x0 + half, yy + (r() - 0.5) * 1.5, { weight: 'fine' });
+        }
+      }
+      return s;
+    },
+
+    text, textWidth, title, label,
+
+    /** Raw pieces, for combining frames (see svgDocument). */
+    parts() { return { defs: defs.slice(), body: body.slice() }; },
+    /** Finish: the SVG string. size = output pixel width (viewBox stays in sheet units). */
+    toSVG(o = {}) {
+      return svgDocument([{ defs, body }], { W, H, seed, size: o.size, transparent: o.transparent || opts.transparent, paper: o.paper, grid: o.grid });
+    },
+  };
+
+  /* -------------------- higher-level pieces */
+  installPieces(k, { geo, draw, fill, ink, shade, hatch, group, scoped, rng, shapeRng, body, tx });
+  return k;
+}
+
+function norm(v) { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; }
+
+/**
+ * Build the SVG document. frames: [{defs, body}]. One frame = a still. Several = a looping CSS animation
+ * (fps, frames shown in turn). Paper and grid are shared.
+ */
+export function svgDocument(frames, o) {
+  const { W, H } = o;
+  const size = o.size || W;
+  const pxH = Math.round((size * H) / W);
+  const paperOn = !o.transparent;
+  const pseed = (hashStr('paper' + o.seed) % 997) + 1;
+  const parts = [];
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${pxH}" viewBox="0 0 ${W} ${H}">`);
+  parts.push('<defs>');
+  if (paperOn) {
+    parts.push(`<filter id="mottle" x="0" y="0" width="100%" height="100%" filterUnits="userSpaceOnUse">` +
+      `<feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="2" seed="${pseed + 7}"/>` +
+      `<feColorMatrix type="matrix" values="0 0 0 0 0.55  0 0 0 0 0.45  0 0 0 0 0.3  1.2 0 0 0 -0.5"/></filter>`);
+  }
+  const seen = new Set();
+  for (const f of frames) for (const d of f.defs) { if (!seen.has(d)) { seen.add(d); parts.push(d); } }
+  parts.push('</defs>');
+  if (paperOn) {
+    parts.push(`<rect width="${W}" height="${H}" fill="${o.paper ? soften(o.paper) : PALETTE.paper}"/>`);
+    parts.push(`<rect width="${W}" height="${H}" filter="url(#mottle)" opacity="0.16"/>`);
+  }
+  if (frames.length === 1) parts.push(...frames[0].body);
+  else {
+    const n = frames.length, dt = 1 / (o.fps || 10), dur = n * dt;
+    parts.push(`<style>.hd-f{visibility:hidden;animation:hd-fr ${fmt(dur * 1000)}ms step-end infinite}` +
+      `@keyframes hd-fr{0%{visibility:visible}${(100 / n).toFixed(3)}%{visibility:hidden}100%{visibility:hidden}}</style>`);
+    frames.forEach((f, i) => {
+      // frame 0 is also the static fallback (renderers without CSS animation show it)
+      parts.push(`<g class="hd-f" style="animation-delay:${fmt(i * dt * 1000)}ms${i === 0 ? ';visibility:visible' : ''}">`);
+      parts.push(...f.body);
+      parts.push('</g>');
+    });
+  }
+  if (o.grid) parts.push(gridSVG(W, H));
+  parts.push('</svg>');
+  return parts.join('\n');
+}
+
+function gridSVG(W, H) {
+  const g = ['<g id="grid" font-family="sans-serif" font-size="13" fill="#3070c0" stroke="#3070c0">'];
+  for (let x = 0; x <= W; x += 50) g.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke-width="${x % 100 ? 0.4 : 0.9}" stroke-opacity="0.45"/>`);
+  for (let y = 0; y <= H; y += 50) g.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke-width="${y % 100 ? 0.4 : 0.9}" stroke-opacity="0.45"/>`);
+  for (let x = 100; x < W; x += 100) g.push(`<text x="${x + 3}" y="14" stroke="none">${x}</text>`);
+  for (let y = 100; y < H; y += 100) g.push(`<text x="3" y="${y - 3}" stroke="none">${y}</text>`);
+  g.push('</g>');
+  return g.join('');
+}
+
+/* ================================================================== pieces */
+// Each piece is drawn in its own local units and placed with a group, so it works at any size.
+// All take (x, groundY or top, options) in the current coordinates and return anchor points.
+
+function installPieces(k, I) {
+  const { geo, draw, group, scoped } = I;
+
+  /** A single leaf. (x, y) = where it joins the stem; angle in degrees (0 = pointing right, -90 = up). */
+  k.leaf = (x, y, o = {}) => {
+    const len = o.len || 60, wd = (o.width || 0.42) * len;
+    return group({ x, y, rotate: o.angle == null ? -45 : o.angle }, () => scoped('leaf', () => {
+      const s = geo.spline([[0, 0, 'c'], [len * 0.28, -wd * 0.5], [len * 0.7, -wd * 0.42], [len, 0, 'c'], [len * 0.68, wd * 0.45], [len * 0.26, wd * 0.48]], true);
+      draw(s, { fill: o.fill || 'leaf', shade: o.shade == null ? 0.35 : o.shade, weight: o.weight || 'detail' });
+      if (o.vein !== false) k.line([[len * 0.06, 0], [len * 0.45, -wd * 0.04], [len * 0.84, -wd * 0.02]].map((p) => p), { weight: 'fine' });
+      return { tip: k.toSheet(len, 0) };
+    }));
+  };
+
+  /** Round shrub sitting on the ground. */
+  k.shrub = (x, groundY, o = {}) => {
+    const r = o.r || 90;
+    return scoped('shrub', () => {
+      const s = geo.blob(x, groundY - r * 0.78, r, { squash: 0.82, bumps: o.bumps || 8, bump: 0.13 });
+      draw(s, { fill: o.fill || 'green', shade: 0.32 });
+      for (let i = 0; i < (o.marks == null ? 5 : o.marks); i++) {
+        const a = -2.6 + i * 0.55 + k.rand(-0.2, 0.2), rr = r * k.rand(0.25, 0.6);
+        const cx = x + Math.cos(a) * rr, cy = groundY - r * 0.78 + Math.sin(a) * rr * 0.8 + r * 0.25;
+        k.arc(cx, cy, r * 0.09, r * 0.06, 200, 340, { weight: 'fine' });
+      }
+      if (o.flowers) for (let i = 0; i < o.flowers; i++) {
+        const a = k.rand(0, TAU), rr = r * k.rand(0.2, 0.7);
+        k.circle(x + Math.cos(a) * rr, groundY - r * 0.8 + Math.sin(a) * rr * 0.7, r * 0.06, { fill: o.flowerFill || 'pink', weight: 'fine' });
+      }
+      return { top: groundY - r * 1.6, cx: x };
+    });
+  };
+
+  /** Lollipop/cloud tree standing on the ground. h = total height. */
+  k.tree = (x, groundY, o = {}) => {
+    const h = o.h || 400;
+    return group({ x, y: groundY, scale: h / 100 }, () => scoped('tree', () => {
+      k.shadow(0, 0, 26, 4, { lines: 2 });
+      const trunk = geo.spline([[-5.5, 0, 'c'], [-4, -18], [-3.4, -42, 'c'], [3.4, -42, 'c'], [4, -18], [5.5, 0, 'c']], true);
+      draw(trunk, { fill: o.trunk || 'wood', shade: 0.4 });
+      k.line([[0.4, -26], [6, -36], [9, -44]], { weight: 'detail' });
+      const crown = geo.blob(0, -64, 34, { squash: o.squash || 0.98, bumps: o.bumps || 10, bump: 0.11 });
+      draw(crown, { fill: o.fill || 'green', shade: 0.3 });
+      const marks = [[-14, -70], [8, -78], [14, -58], [-4, -54], [-18, -52], [2, -88]];
+      for (const [mx, my] of marks.slice(0, o.marks == null ? 6 : o.marks)) k.arc(mx, my, 4, 3, 200, 340, { weight: 'fine' });
+      if (o.fruit) for (const [fx, fy] of [[-16, -60], [10, -66], [-2, -80], [18, -76], [-8, -46]].slice(0, o.fruit)) k.circle(fx, fy, 3, { fill: o.fruitFill || 'red', weight: 'fine' });
+      return { top: k.toSheet(0, -98), crown: k.toSheet(0, -64) };
+    }));
+  };
+
+  /** Cat. pose 'sit' (front view) or 'sleep' (curled, side view). size = height for sit, length for sleep. */
+  k.cat = (x, groundY, o = {}) => {
+    const pose = o.pose || 'sit';
+    const fillC = o.fill || 'orange';
+    const size = o.size || 300;
+    const t = o.t == null ? k.t : o.t;
+    const sway = o.animate ? Math.sin(TAU * t) : 0;
+    if (pose === 'sleep') return group({ x, y: groundY, scale: size / 100, flipX: o.facing === 'left' }, () => scoped('cat-sleep', () => {
+      if (o.shadow !== false) k.shadow(0, 0, 54, 5, { lines: 2 });
+      // tail behind the body, curling round to the front
+      const body = geo.blob(4, -22, 46, { squash: 0.5, irregular: 0.02 });
+      draw(body, { fill: fillC, shade: 0.4 });
+      if (o.stripes !== false) for (const sx of [-6, 6, 18]) k.arc(sx, -36, 6, 7, 205, 335, { weight: 'detail' });
+      k.tube([[48, -14], [44, -3], [20, 1], [-14, 0], [-30, -5 + sway * 2]], [7, 5], { fill: fillC, weight: 'detail' });
+      // head resting on the left
+      group({ x: -34, y: -26 }, () => {
+        k.poly([[-18, -6], [-17, -24], [-6, -15]], { fill: fillC, weight: 'detail' });
+        k.poly([[4, -15], [12, -25], [15, -8]], { fill: fillC, weight: 'detail' });
+        k.poly([[-15.5, -9], [-15, -19], [-9, -14]], { fill: 'pink', ink: false });
+        draw(geo.blob(-2, -2, 17, { squash: 0.82 }), { fill: fillC, shade: 0.35 });
+        k.arc(-9, -2, 3.6, 2.4, 20, 160, { weight: 'detail' });
+        k.arc(4, -2, 3.6, 2.4, 20, 160, { weight: 'detail' });
+        k.poly([[-3.6, 3], [-0.6, 3], [-2.1, 5]], { fill: 'pink', weight: 'fine' });
+        k.ellipse(-13, 4, 3.2, 2, { fill: 'blush', ink: false });
+        k.ellipse(9, 4, 3.2, 2, { fill: 'blush', ink: false });
+      });
+      // front paw
+      k.ellipse(-20, -4, 7, 4, { fill: fillC, weight: 'detail' });
+      return { head: k.toSheet(-36, -28), top: k.toSheet(0, -48), tail: k.toSheet(-32, -6) };
+    }));
+
+    return group({ x, y: groundY, scale: size / 100, flipX: o.facing === 'left' }, () => scoped('cat-sit', () => {
+      if (o.shadow !== false) k.shadow(4, 0, 42, 5, { lines: 2 });
+      // tail: behind the body, sweeping out to the right and curling up
+      const tip = [52 + sway * 5, -40 - Math.abs(sway) * 2];
+      k.tube([[18, -4], [40, -6], [50, -18], tip], [9, 7], { fill: fillC, weight: 'detail' });
+      // body: a soft pear
+      const body = geo.spline([[-31, 0, 'c'], [-36, -12], [-30, -32], [-14, -52], [14, -52], [30, -32], [36, -12], [31, 0, 'c']], true);
+      draw(body, { fill: fillC, shade: 0.3 });
+      // chest patch
+      if (o.bib !== false) k.spline([[-9, -50], [-12, -34], [-7, -18], [0, -14], [7, -18], [12, -34], [9, -50]], { closed: true, fill: o.bibFill || 'cream', ink: false });
+      // front legs + paws
+      k.line([[-6, -26], [-7, -4]], { weight: 'detail' });
+      k.line([[6, -26], [7, -4]], { weight: 'detail' });
+      k.ellipse(-11, -3, 8.5, 4.6, { fill: fillC, weight: 'detail' });
+      k.ellipse(11, -3, 8.5, 4.6, { fill: fillC, weight: 'detail' });
+      // ears (behind the head)
+      k.poly([[-23, -62], [-20, -91], [-6, -77]], { fill: fillC });
+      k.poly([[23, -62], [20, -91], [6, -77]], { fill: fillC });
+      k.poly([[-19, -70], [-18.5, -84], [-10, -76]], { fill: 'pink', ink: false });
+      k.poly([[19, -70], [18.5, -84], [10, -76]], { fill: 'pink', ink: false });
+      // head
+      const head = geo.blob(0, -66, 26, { squash: 0.84, irregular: 0.02 });
+      draw(head, { fill: fillC, shade: 0.3 });
+      if (o.stripes !== false) for (const sx of [-6, 0, 6]) k.line([[sx, -86], [sx * 1.1, -79]], { weight: 'detail' });
+      // face
+      const eyes = o.eyes || 'open';
+      const blink = o.animate && t > 0.86 && t < 0.94;
+      if (eyes === 'closed' || blink) {
+        k.arc(-10, -66, 5, 3.4, 20, 160, { weight: 'detail' });
+        k.arc(10, -66, 5, 3.4, 20, 160, { weight: 'detail' });
+      } else {
+        k.dot(-10, -66, 3.1);
+        k.dot(10, -66, 3.1);
+        k.dot(-9, -67.4, 0.9, { fill: 'white' });
+        k.dot(11, -67.4, 0.9, { fill: 'white' });
+      }
+      k.poly([[-2.6, -60], [2.6, -60], [0, -57]], { fill: 'pink', weight: 'fine' });
+      k.spline([[-5, -54], [-2.5, -52.5], [0, -54.5], [2.5, -52.5], [5, -54]], { weight: 'fine' });
+      k.ellipse(-16, -58, 4.5, 2.6, { fill: 'blush', ink: false });
+      k.ellipse(16, -58, 4.5, 2.6, { fill: 'blush', ink: false });
+      for (const s of [-1, 1]) {
+        k.line([[s * 20, -60], [s * 36, -63]], { weight: 'fine' });
+        k.line([[s * 20, -57], [s * 36, -56]], { weight: 'fine' });
+      }
+      return { head: k.toSheet(0, -66), top: k.toSheet(0, -91), tail: k.toSheet(...tip), paws: k.toSheet(0, -3) };
+    }));
+  };
+
+  /** Person, front view, cute proportions. h = total height. */
+  k.person = (x, groundY, o = {}) => {
+    const h = o.h || 400;
+    const skin = o.skin || 'skin', shirt = o.shirt || 'blue', pants = o.pants || 'navy', hair = o.hair || 'chocolate';
+    const t = o.t == null ? k.t : o.t;
+    const wave = o.wave ? Math.sin(TAU * t) * 10 : null;
+    return group({ x, y: groundY, scale: h / 100 }, () => scoped('person', () => {
+      k.shadow(0, 0, 18, 2.6, { lines: 2 });
+      // legs
+      k.tube([[-5, -36], [-5.5, -18], [-6, -4]], 7.5, { fill: pants, weight: 'detail', cap: 'flat' });
+      k.tube([[5, -36], [5.5, -18], [6, -4]], 7.5, { fill: pants, weight: 'detail', cap: 'flat' });
+      k.ellipse(-7.5, -2.2, 6, 2.8, { fill: o.shoes || 'charcoal', weight: 'detail' });
+      k.ellipse(7.5, -2.2, 6, 2.8, { fill: o.shoes || 'charcoal', weight: 'detail' });
+      // arms (behind torso)
+      k.tube([[-11, -60], [-15, -48], [-16, -38]], 6, { fill: shirt, weight: 'detail' });
+      const rh = wave == null ? [16, -38] : [22, -72 + wave * 0.3];
+      const relb = wave == null ? [15, -48] : [20, -60];
+      k.tube([[11, -60], relb, rh], 6, { fill: shirt, weight: 'detail' });
+      k.circle(-16, -36, 3.4, { fill: skin, weight: 'fine' });
+      k.circle(rh[0], rh[1] + (wave == null ? 2 : -2), 3.4, { fill: skin, weight: 'fine' });
+      // torso
+      const torso = geo.spline([[-11, -64], [-12.5, -50], [-12, -34, 'c'], [12, -34, 'c'], [12.5, -50], [11, -64]], true);
+      draw(torso, { fill: shirt, shade: 0.35 });
+      k.line([[-4, -64], [0, -60], [4, -64]], { weight: 'fine' });
+      // head
+      k.rect(-2.4, -68, 4.8, 5, { fill: skin, ink: false });
+      draw(geo.blob(0, -78, 11.5, { squash: 1.02, irregular: 0.02 }), { fill: skin, shade: 0.25 });
+      // hair cap
+      const hairS = geo.spline([[-12, -76, 'c'], [-11.5, -86], [-4, -91], [6, -90], [11.5, -85], [12.2, -76, 'c'], [8, -81], [0, -82.5], [-6, -80]], true);
+      draw(hairS, { fill: hair, weight: 'detail' });
+      if (o.bun) k.circle(0, -92, 4.5, { fill: hair, weight: 'detail' });
+      k.dot(-4, -76.5, 1.15); k.dot(4, -76.5, 1.15);
+      k.arc(0, -72.5, 3, 1.6, 20, 160, { weight: 'fine' });
+      k.ellipse(-7, -73, 2.3, 1.3, { fill: 'blush', ink: false });
+      k.ellipse(7, -73, 2.3, 1.3, { fill: 'blush', ink: false });
+      return { head: k.toSheet(0, -78), top: k.toSheet(0, -91), hand: k.toSheet(...rh), feet: k.toSheet(0, 0) };
+    }));
+  };
+
+  /** Window: (x, y) top-left, w × h. Frame, glass, glazing bars, sill. */
+  k.window = (x, y, w, h, o = {}) => scoped('window', () => {
+    const fr = Math.max(6, w * 0.08);
+    const frameC = o.frame || 'white';
+    if (o.arch) {
+      const pts = [[x, y + h, 'c'], [x, y + w / 2], [x + w * 0.15, y + w * 0.15], [x + w / 2, y], [x + w * 0.85, y + w * 0.15], [x + w, y + w / 2], [x + w, y + h, 'c']];
+      k.spline(pts, { closed: true, fill: frameC });
+      const gi = pts.map((p) => [p[0] + (p[0] < x + w / 2 ? fr : p[0] > x + w / 2 ? -fr : 0), p[1] + (p[1] < y + h ? fr * (p[1] === y ? 1 : 0.6) : -fr), p[2]]);
+      k.spline(gi, { closed: true, fill: o.glass || 'sky', shade: 0.4, weight: 'detail' });
+    } else {
+      k.rect(x, y, w, h, { fill: frameC });
+      k.rect(x + fr, y + fr, w - 2 * fr, h - 2 * fr, { fill: o.glass || 'sky', shade: 0.45, weight: 'detail' });
+    }
+    const [cols, rows] = o.panes || [2, 2];
+    for (let i = 1; i < cols; i++) { const xx = x + (w * i) / cols; k.line(xx, y + fr * (o.arch ? 2 : 1), xx, y + h - fr, { weight: 'detail' }); }
+    for (let j = 1; j < rows; j++) { const yy = y + (h * j) / rows; k.line(x + fr, yy, x + w - fr, yy, { weight: 'detail' }); }
+    // glint
+    k.line(x + fr + w * 0.12, y + fr + h * 0.3, x + fr + w * 0.26, y + fr + h * 0.12, { weight: 'fine' });
+    k.line(x + fr + w * 0.12, y + fr + h * 0.42, x + fr + w * 0.2, y + fr + h * 0.31, { weight: 'fine' });
+    if (o.curtains) {
+      k.spline([[x + fr, y + fr, 'c'], [x + fr + w * 0.22, y + fr, 'c'], [x + fr + w * 0.1, y + h * 0.45], [x + fr + w * 0.04, y + h - fr, 'c'], [x + fr, y + h - fr, 'c']], { closed: true, fill: o.curtains, weight: 'detail' });
+      k.spline([[x + w - fr, y + fr, 'c'], [x + w - fr - w * 0.22, y + fr, 'c'], [x + w - fr - w * 0.1, y + h * 0.45], [x + w - fr - w * 0.04, y + h - fr, 'c'], [x + w - fr, y + h - fr, 'c']], { closed: true, fill: o.curtains, weight: 'detail' });
+    }
+    if (o.sill !== false) k.rect(x - w * 0.07, y + h, w * 1.14, Math.max(8, h * 0.07), { fill: frameC, shade: 0.5 });
+    if (o.flowers) {
+      const by = y + h + Math.max(8, h * 0.07);
+      k.rect(x - w * 0.02, by, w * 1.04, h * 0.16, { fill: o.boxFill || 'wood', shade: 0.5 });
+      for (let i = 0; i < 5; i++) {
+        const fx = x + w * (0.1 + i * 0.2);
+        k.blob(fx, by - 2, w * 0.07, { fill: 'green', bumps: 5, weight: 'detail' });
+        k.circle(fx + w * 0.02, by - w * 0.06, w * 0.03, { fill: o.flowers, weight: 'fine' });
+      }
+    }
+    return { x, y, w, h, cx: x + w / 2, cy: y + h / 2, sill: y + h };
+  });
+
+  /** Door: (x, y) top-left, w × h. */
+  k.door = (x, y, w, h, o = {}) => scoped('door', () => {
+    const c = o.fill || 'red';
+    if (o.arch) k.spline([[x, y + h, 'c'], [x, y + w / 2], [x + w / 2, y], [x + w, y + w / 2], [x + w, y + h, 'c']], { closed: true, fill: c, shade: 0.25 });
+    else k.rect(x, y, w, h, { fill: c, shade: 0.25 });
+    if (o.panels !== false) {
+      const px = x + w * 0.18, pw = w * 0.64;
+      const top = o.arch ? y + w * 0.55 : y + h * 0.1;
+      if (o.glass) k.roundRect(px, top, pw, h * 0.24, 4, { fill: 'sky', weight: 'detail' });
+      else k.rect(px, top, pw, h * 0.3, { weight: 'detail', ink: true });
+      k.rect(px, y + h * 0.52, pw, h * 0.36, { weight: 'detail' });
+    }
+    if (o.knob !== false) k.circle(x + w * 0.82, y + h * 0.5, Math.max(3.5, w * 0.045), { fill: 'ochre', weight: 'detail' });
+    if (o.step !== false) k.rect(x - w * 0.1, y + h, w * 1.2, Math.max(8, h * 0.05), { fill: 'stone', shade: 0.5 });
+    return { x, y, w, h, cx: x + w / 2 };
+  });
+
+  /** House front. x = centre, groundY = ground line. */
+  k.house = (x, groundY, o = {}) => scoped('house', () => {
+    const w = o.w || 460, h = o.h || 300, roofH = o.roofH || h * 0.62, ov = o.overhang == null ? w * 0.07 : o.overhang;
+    const x0 = x - w / 2, top = groundY - h;
+    k.shadow(x, groundY + 4, w * 0.62, 12, { lines: 3 });
+    if (o.chimney !== false) {
+      const cx = x + w * 0.24;
+      k.rect(cx - w * 0.05, top - roofH * 0.82, w * 0.1, roofH * 0.6, { fill: o.chimneyFill || 'brick', shade: 0.4 });
+      k.rect(cx - w * 0.065, top - roofH * 0.86, w * 0.13, roofH * 0.08, { fill: o.chimneyFill || 'brick' });
+    }
+    const wall = geo.rect(x0, top, w, h);
+    draw(wall, { fill: o.wall || 'cream', shade: false });
+    hatchSafe(wall, { region: 'shade', amount: 0.12, spacing: 8 });
+    // simple brick hints
+    if (o.bricks !== false) {
+      const marks = [[0.08, 0.2], [0.86, 0.32], [0.12, 0.72], [0.9, 0.8], [0.5, 0.06]];
+      for (const [mx, my] of marks) {
+        const bx = x0 + w * mx, by = top + h * my;
+        k.rect(bx, by, w * 0.06, h * 0.035, { weight: 'fine' });
+        k.rect(bx + w * 0.035, by + h * 0.035, w * 0.06, h * 0.035, { weight: 'fine' });
+      }
+    }
+    const roof = geo.poly([[x0 - ov, top + 4], [x, top - roofH], [x0 + w + ov, top + 4]]);
+    draw(roof, { fill: o.roof || 'red', shade: 0.18 });
+    I.hatch(roof, { region: 'all', angle: 0, spacing: Math.max(12, roofH / 7), weight: 'fine', inset: 5 });
+    k.line([[x0 - ov - 4, top + 6], [x0 + w + ov + 4, top + 6]], { weight: 'outline' });
+    const dw = o.doorW || w * 0.2, dh = o.doorH || h * 0.56;
+    const door = k.door(x - dw / 2, groundY - dh - Math.max(8, dh * 0.05), dw, dh, { fill: o.door || 'teal', arch: o.archDoor });
+    const ww = o.windowW || w * 0.2, wh = o.windowH || h * 0.28;
+    const wy = top + h * 0.2;
+    const left = k.window(x0 + w * 0.1, wy, ww, wh, { frame: 'white', curtains: o.curtains, flowers: o.flowers });
+    const right = k.window(x0 + w * 0.9 - ww, wy, ww, wh, { frame: 'white', curtains: o.curtains, flowers: o.flowers });
+    if (o.atticWindow !== false) k.circle(x, top - roofH * 0.38, roofH * 0.13, { fill: 'sky', shade: 0.4 });
+    return { roofTop: [x, top - roofH], door, windows: [left, right], chimney: [x + w * 0.24, top - roofH * 0.86], left: x0, right: x0 + w, top };
+    function hatchSafe(s, ho) { I.hatch(s, ho); }
+  });
+
+  /** Steam / smoke wisps rising from (x, y). Loops with t when animated. */
+  k.steam = (x, y, o = {}) => scoped('steam', () => {
+    const n = o.n || 3, hgt = o.h || 120, sp = o.spread || 26;
+    const t = o.t == null ? k.t : o.t;
+    for (let i = 0; i < n; i++) {
+      const ph = TAU * (t + i / n);
+      const xx = x + (i - (n - 1) / 2) * sp;
+      const pts = [];
+      for (let j = 0; j <= 6; j++) {
+        const f = j / 6;
+        pts.push([xx + Math.sin(f * 5 + ph) * (6 + f * 8), y - f * hgt * (0.8 + 0.2 * Math.sin(ph + i))]);
+      }
+      k.spline(pts, { weight: 'detail', ink: o.ink || 'charcoal' });
+    }
+  });
+
+  /** Little grass tufts along a ground line. */
+  k.grass = (x0, x1, y, o = {}) => scoped('grass', () => {
+    const n = o.n || Math.max(2, Math.round((x1 - x0) / 60));
+    for (let i = 0; i < n; i++) {
+      const gx = x0 + ((x1 - x0) * (i + 0.5)) / n + k.rand(-10, 10);
+      const s = (o.size || 14) * k.rand(0.8, 1.2);
+      k.line([[gx - s * 0.5, y - s * 0.9], [gx - s * 0.1, y]], { weight: 'fine' });
+      k.line([[gx, y - s * 1.2], [gx + s * 0.05, y]], { weight: 'fine' });
+      k.line([[gx + s * 0.55, y - s * 0.8], [gx + s * 0.15, y]], { weight: 'fine' });
+    }
+  });
+}
+
+export { soften, darker, lighter, PALETTE, mulberry32 };

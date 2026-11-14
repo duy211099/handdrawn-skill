@@ -1,0 +1,11 @@
+{
+  "name": "handdrawn",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hand-drawn 2D SVG illustrations (ink + marker wash + paper grain). Claude Code skill.",
+  "license": "MIT",
+  "optionalDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}
