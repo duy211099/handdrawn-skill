@@ -74,7 +74,7 @@ Vietnamese works as typed (`'phở bò'`, `'Đà Lạt'`, `'ở ấ ự'`): tone
 | `k.shrub(x, groundY, { r: 90, fill, bumps, flowers, flowerFill })` | round bush sitting on the ground |
 | `k.tree(x, groundY, { h: 400, fill, trunk, fruit, fruitFill })` | cloud-crown tree. Returns `{ top, crown }` |
 | `k.cat(x, groundY, { size: 300, pose: 'sit'\|'sleep', fill, eyes: 'open'\|'closed', facing: 'left', bib, stripes, shadow, animate, t })` | cute round cat. sit = front view (size = height), sleep = curled side view (size = length). Returns `{ head, top, tail }` |
-| `k.person(x, groundY, { h: 400, skin, shirt, pants, hair, shoes, bun, wave })` | front-view person, big head. Returns `{ head, top, hand, feet }` |
+| `k.person(x, groundY, { h: 400, skin, shirt, pants, hair, shoes, bun, wave, shadow })` | front-view person, big head. `wave: true` raises the right arm; with `t` the forearm swings side to side from the elbow. `shadow: false` drops the ground shadow. Returns `{ head, top, hand, feet }` |
 | `k.window(x, y, w, h, { panes: [2,2], frame, glass, arch, curtains, sill, flowers })` | window with frame, glazing bars, glint, sill |
 | `k.door(x, y, w, h, { fill, arch, glass, panels, knob, step })` | front door |
 | `k.house(x, groundY, { w: 460, h: 300, roof, wall, door, chimney, curtains, flowers, atticWindow })` | house front with roof tiles, door, two windows, chimney. Returns anchors |
@@ -88,11 +88,11 @@ Vietnamese works as typed (`'phở bò'`, `'Đà Lạt'`, `'ở ấ ự'`): tone
 ## Renderer
 
 ```
-node assets/render.mjs scene.js -o out.svg --png out.png --thumb      # still + 128px thumbnail
+node assets/render.mjs scene.js -o out.svg --png out.png --thumb      # animated SVG + PNG still (frame 0) + 128px thumbnail
   --seed N          different wobble, same composition
   --size 1600       output pixel width (drawing stays in sheet units)
   --transparent     no paper background
   --grid            coordinate grid overlay for checking positions (never deliver with it)
   --gif out.gif     animated GIF: --frames 8 --fps 10 --boil 2 --gif-size 560
-  --animate         out.svg becomes a looping animated SVG (CSS; browsers only)
+  --still           out.svg is a single frame (by default it is a looping animated SVG: CSS, no script)
 ```

@@ -1,12 +1,14 @@
 ---
 name: handdrawn
-description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained SVG (plus PNG, or a small looping GIF) in a hand-drawn ink-and-marker look, flat 2D front or side view, like a children's-book or field-notebook sketch. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"). Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a hand-drawn ink-and-marker look, flat 2D front or side view, like a children's-book or field-notebook sketch. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"). Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn
 
-Draws one picture as a self-contained SVG: wobbly ink lines of varying width, marker washes slightly off the
-lines, on cream paper. Flat 2D, front or side view. Labels and titles use a built-in hand-drawn
+Draws one picture as a self-contained **animated SVG**: wobbly ink lines of varying width, marker washes slightly
+off the lines, on cream paper. Flat 2D, front or side view. The lines "boil" (the wobble is redrawn every 2 frames),
+so even a still subject looks alive, and the scene can add a small motion with `t`. For a 3D, isometric version use
+the **handdrawn-3d** skill instead. Labels and titles use a built-in hand-drawn
 stroke font that covers Latin and **Vietnamese**.
 
 Kit: `assets/kit.js` · renderer: `assets/render.mjs` · every function: `references/kit.md` (read it before
@@ -23,7 +25,9 @@ SVG output needs nothing.
   Say so and suggest one or two concrete scenes that show it ("a seedling pushing through a crack in a pavement"),
   then draw the one the user picks.
 - **Diagrams, charts, UI, buttons, interactive things:** not this skill.
-- **Animation:** only when the user asks for it ("animated", "gif", "moving"). Otherwise always a still.
+- **Animation:** the SVG always loops (line boil). Add one small motion that belongs to the subject (steam, a tail
+  swish, a blink, leaves swaying) when it fits or when the user asks; otherwise the boil alone is enough.
+  A single-frame SVG only when the user asks for a still (`--still`).
 
 ## Workflow
 
@@ -51,7 +55,8 @@ SVG output needs nothing.
    - Labels don't sit on top of the drawing or cross other lines.
    Repeat 4–5 until it's right (usually 2–4 rounds). Then render the final **without** `--grid`.
 
-**Never deliver without having looked at the PNG.** Deliver the SVG (and the PNG) paths, and show the PNG.
+**Never deliver without having looked at the PNG.** Deliver the SVG (the animated picture) and the PNG paths, and
+show the PNG. If the scene moves, also check a few frames (see *Animation*).
 
 ## Style rules
 
@@ -90,16 +95,18 @@ export function draw(k, t = 0) {
 }
 ```
 
-## Animation (only when asked)
+## Animation (always on)
 
-Scenes get `t` ∈ [0, 1), one loop. Keep it simple: one or two moving things (steam, a tail swish, a blink, leaves
-swaying, smoke) plus the automatic **line boil**: the wobble is re-drawn every 2 frames, so even a still subject
-looks alive. Make motion loop seamlessly with `Math.sin(2 * Math.PI * t)`. The ready-made pieces take `t`:
+`out.svg` is a looping animated SVG by default: frames switched by CSS, no script, plays in browsers and `<img>`
+tags (renderers without CSS animation show frame 0). Scenes get `t` ∈ [0, 1), one loop. Keep it simple: at most one
+or two moving things (steam, a tail swish, a blink, leaves swaying, smoke) on top of the automatic **line boil**:
+the wobble is re-drawn every 2 frames, so even a still subject looks alive. Make motion loop seamlessly with `Math.sin(2 * Math.PI * t)`. The ready-made pieces take `t`:
 `k.steam(x, y, { t })`, `k.cat(..., { animate: true, t })`, `k.person(..., { wave: true, t })`.
 
 ```
-node <skill>/assets/render.mjs scene.js -o out/scene.svg --gif out/scene.gif            # GIF, plays everywhere
-node <skill>/assets/render.mjs scene.js -o out/scene.svg --animate                     # animated SVG (browsers only)
+node <skill>/assets/render.mjs scene.js -o out/scene.svg --png out/scene.png          # animated SVG + PNG still
+node <skill>/assets/render.mjs scene.js -o out/scene.svg --gif out/scene.gif          # + GIF, plays everywhere
+node <skill>/assets/render.mjs scene.js -o out/scene.svg --still                      # single-frame SVG
      --frames 8 --fps 10 --boil 2 --gif-size 560
 ```
 

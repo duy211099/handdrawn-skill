@@ -28,14 +28,17 @@ function buildPalette(frames, maxColors, hasAlpha) {
       for (const c of b) { pop += c[3]; for (let j = 0; j < 3; j++) { if (c[j] < lo[j]) lo[j] = c[j]; if (c[j] > hi[j]) hi[j] = c[j]; } }
       const ranges = [hi[0] - lo[0], (hi[1] - lo[1]) * 1.2, hi[2] - lo[2]];
       const ch = ranges.indexOf(Math.max(...ranges));
-      const score = ranges[ch] * Math.sqrt(pop);
+      // mostly by colour range: a big flat area (the paper) must not eat the palette that mid tones need
+      const score = ranges[ch] * Math.pow(pop, 0.2);
       if (score > best) { best = score; bi = i; bch = ch; }
     });
     if (bi < 0 || best <= 0) break;
     const b = boxes[bi].sort((p, q) => p[bch] - q[bch]);
-    let total = 0; for (const c of b) total += c[3];
-    let acc = 0, cut = 1;
-    for (let i = 0; i < b.length - 1; i++) { acc += b[i][3]; if (acc >= total / 2) { cut = i + 1; break; } }
+    // cut at the middle of the colour range (not the population median), so a rare colour isn't folded into
+    // the box of a big flat area and averaged away
+    const midV = (b[0][bch] + b[b.length - 1][bch]) / 2;
+    let cut = b.findIndex((c) => c[bch] > midV);
+    if (cut <= 0) cut = Math.max(1, b.length >> 1);
     boxes.splice(bi, 1, b.slice(0, cut), b.slice(cut));
   }
   const pal = boxes.filter((b) => b.length).map((b) => {

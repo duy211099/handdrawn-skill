@@ -3,7 +3,7 @@
 //
 //   node render.mjs scene.js -o out.svg [--png out.png] [--thumb out-128.png] [--seed N] [--size 1000]
 //                   [--transparent] [--grid] [--gif out.gif --frames 8 --fps 10 --boil 2 --gif-size 560]
-//                   [--animate]   (out.svg becomes a looping animated SVG)
+//                   [--still]     (out.svg is a looping animated SVG by default; --still makes it one frame)
 //
 // A scene file:  export function draw(k, t) { ... }      (t in [0,1) for animation; ignore it for stills)
 //                export const sheet = { width: 1000, height: 1000, seed: 3, transparent: false }  (all optional)
@@ -32,7 +32,7 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 if (!args._[0] || args.help) {
   console.log(`usage: node render.mjs scene.js -o out.svg [--png out.png] [--thumb [out-128.png]] [--seed N] [--size 1000]
-                 [--transparent] [--grid] [--gif out.gif] [--frames 8] [--fps 10] [--boil 2] [--gif-size 560] [--animate]`);
+                 [--transparent] [--grid] [--gif out.gif] [--frames 8] [--fps 10] [--boil 2] [--gif-size 560] [--still]`);
   process.exit(args.help ? 0 : 1);
 }
 
@@ -44,6 +44,8 @@ const W = +(sheet.width || 1000), H = +(sheet.height || 1000);
 const seed = args.seed != null && args.seed !== true ? +args.seed : sheet.seed != null ? sheet.seed : 1;
 const transparent = !!(args.transparent || sheet.transparent);
 const size = args.size && args.size !== true ? +args.size : W;
+// animated SVG by default (line boil + any motion from t); --still (or sheet.still) for a single frame
+const animate = !(args.still || sheet.still) || !!args.animate;
 const out = args.out || join(dirname(scenePath), basename(scenePath, extname(scenePath)) + '.svg');
 
 function frameParts(t, frameSeed, idPrefix) {
@@ -76,14 +78,14 @@ const animFrames = () => Array.from({ length: nFrames }, (_, i) =>
 
 // --- SVG
 let svg;
-if (args.animate) svg = svgDocument(animFrames(), docOpts({ size, fps, grid: !!args.grid }));
+if (animate) svg = svgDocument(animFrames(), docOpts({ size, fps, grid: !!args.grid }));
 else svg = svgDocument([frameParts(0, seed, '')], docOpts({ size, grid: !!args.grid }));
 ensureDir(out);
 writeFileSync(out, svg);
-console.log(`svg   ${out}  (${(svg.length / 1024).toFixed(0)} KB${args.animate ? `, ${nFrames} frames @ ${fps} fps` : ''})`);
+console.log(`svg   ${out}  (${(svg.length / 1024).toFixed(0)} KB${animate ? `, ${nFrames} frames @ ${fps} fps` : ''})`);
 
 // stills for PNG/thumbnail always use frame 0 (no CSS animation in rasterisers)
-const still = args.animate ? svgDocument([frameParts(0, seed, '')], docOpts({ grid: !!args.grid })) : svg;
+const still = animate ? svgDocument([frameParts(0, seed, '')], docOpts({ grid: !!args.grid })) : svg;
 if (args.png) {
   const p = args.png === true ? out.replace(/\.svg$/, '') + '.png' : args.png;
   ensureDir(p);
@@ -92,7 +94,7 @@ if (args.png) {
 }
 if (args.thumb) {
   const p = args.thumb === true ? out.replace(/\.svg$/, '') + '-128.png' : args.thumb;
-  const noGrid = args.animate || args.grid ? svgDocument([frameParts(0, seed, '')], docOpts()) : svg;
+  const noGrid = animate || args.grid ? svgDocument([frameParts(0, seed, '')], docOpts()) : svg;
   ensureDir(p);
   writeFileSync(p, (await rasterize(noGrid, 128)).asPng());
   console.log(`thumb ${p}`);

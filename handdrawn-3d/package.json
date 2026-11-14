@@ -1,0 +1,11 @@
+{
+  "name": "handdrawn-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "3D scenes drawn by hand (ink + flat marker tones on paper) as looping animated SVG. Claude Code skill.",
+  "license": "MIT",
+  "optionalDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

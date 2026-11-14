@@ -34,6 +34,25 @@ const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 const fmt = (n) => { const r = Math.round(n * 10) / 10; return (r === 0 ? 0 : r).toString(); };
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
+// compact path data: absolute start, then relative steps on a 0.1 grid (rounding the absolute points first, so
+// the steps add up exactly). Numbers drop the leading 0 and use '-' as a separator, like SVG minifiers do.
+function encodePath(P, close) {
+  if (!P.length) return '';
+  const r = (v) => Math.round(v * 10);
+  const num = (n) => { let s = (n / 10).toString(); if (s.startsWith('0.')) s = s.slice(1); else if (s.startsWith('-0.')) s = '-' + s.slice(2); return s; };
+  let px = r(P[0][0]), py = r(P[0][1]);
+  let out = 'M' + num(px) + (py < 0 ? '' : ' ') + num(py) + 'l';
+  let first = true;
+  for (let i = 1; i < P.length; i++) {
+    const x = r(P[i][0]), y = r(P[i][1]), dx = x - px, dy = y - py;
+    if (!dx && !dy) continue;
+    const a = num(dx), b = num(dy);
+    out += (first || a[0] === '-' ? '' : ' ') + a + (b[0] === '-' ? '' : ' ') + b;
+    first = false; px = x; py = y;
+  }
+  if (first) out += '0 0';
+  return out + (close ? 'z' : '');
+}
 function polyLen(P) { let L = 0; for (let i = 1; i < P.length; i++) L += dist(P[i - 1], P[i]); return L; }
 
 function resample(P, step) {
@@ -62,6 +81,20 @@ function signedArea(P) {
   let s = 0;
   for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; s += a[0] * b[1] - b[0] * a[1]; }
   return s / 2;
+}
+// Douglas-Peucker: drop points closer than tol to the line through their neighbours
+function simplify(P, tol) {
+  if (P.length < 4) return P;
+  const keep = new Uint8Array(P.length); keep[0] = keep[P.length - 1] = 1;
+  const stack = [[0, P.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    const ax = P[a][0], ay = P[a][1], dx = P[b][0] - ax, dy = P[b][1] - ay, L = Math.hypot(dx, dy) || 1e-9;
+    let md = 0, mi = -1;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs((P[i][0] - ax) * dy - (P[i][1] - ay) * dx) / L; if (d > md) { md = d; mi = i; } }
+    if (md > tol) { keep[mi] = 1; stack.push([a, mi], [mi, b]); }
+  }
+  return P.filter((_, i) => keep[i]);
 }
 function bboxOf(P) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -458,8 +491,8 @@ export function createKit(opts = {}) {
     }
     const c0 = [(L1[0][0] + R1[0][0]) / 2 - t0[0] * hw0 * 0.9, (L1[0][1] + R1[0][1]) / 2 - t0[1] * hw0 * 0.9];
     const cN = [(L1[n - 1][0] + R1[n - 1][0]) / 2 + tN[0] * hwN * 0.9, (L1[n - 1][1] + R1[n - 1][1]) / 2 + tN[1] * hwN * 0.9];
-    const ring = [c0, ...L1, cN, ...R1.reverse()];
-    return 'M' + ring.map((p) => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + 'Z';
+    const ring = simplify([c0, ...L1], 0.18).concat(simplify([cN, ...R1.reverse()], 0.18));
+    return encodePath(ring, true);
   }
   function blobPath(c, rr, r) {
     const pts = [];
@@ -469,7 +502,7 @@ export function createKit(opts = {}) {
       const q = rr * (1 + 0.12 * Math.sin(a * 2 + ph));
       pts.push([c[0] + Math.cos(a) * q, c[1] + Math.sin(a) * q]);
     }
-    return 'M' + pts.map((p) => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + 'Z';
+    return encodePath(pts, true);
   }
   // open a closed loop at a random point; overrun past the start (or stop just short)
   function openLoop(P, r) {
@@ -533,7 +566,7 @@ export function createKit(opts = {}) {
     }
     return out;
   }
-  const pathD = (P, close = true) => 'M' + P.map((p) => fmt(p[0]) + ' ' + fmt(p[1])).join('L') + (close ? 'Z' : '');
+  const pathD = (P, close = true) => encodePath(P, close);
 
   /* -------------------- shapes */
 
@@ -1152,9 +1185,10 @@ function installPieces(k, I) {
     const h = o.h || 400;
     const skin = o.skin || 'skin', shirt = o.shirt || 'blue', pants = o.pants || 'navy', hair = o.hair || 'chocolate';
     const t = o.t == null ? k.t : o.t;
-    const wave = o.wave ? Math.sin(TAU * t) * 10 : null;
+    // wave: the raised forearm swings left <-> right around the elbow, ±24°, one swing per loop
+    const wave = o.wave ? (24 * Math.sin(TAU * t) * Math.PI) / 180 : null;
     return group({ x, y: groundY, scale: h / 100 }, () => scoped('person', () => {
-      k.shadow(0, 0, 18, 2.6, { lines: 2 });
+      if (o.shadow !== false) k.shadow(0, 0, 18, 2.6, { lines: 2 });
       // legs
       k.tube([[-5, -36], [-5.5, -18], [-6, -4]], 7.5, { fill: pants, weight: 'detail', cap: 'flat' });
       k.tube([[5, -36], [5.5, -18], [6, -4]], 7.5, { fill: pants, weight: 'detail', cap: 'flat' });
@@ -1162,11 +1196,18 @@ function installPieces(k, I) {
       k.ellipse(7.5, -2.2, 6, 2.8, { fill: o.shoes || 'charcoal', weight: 'detail' });
       // arms (behind torso)
       k.tube([[-11, -60], [-15, -48], [-16, -38]], 6, { fill: shirt, weight: 'detail' });
-      const rh = wave == null ? [16, -38] : [22, -72 + wave * 0.3];
-      const relb = wave == null ? [15, -48] : [20, -60];
-      k.tube([[11, -60], relb, rh], 6, { fill: shirt, weight: 'detail' });
+      let rh;
+      if (wave == null) {
+        rh = [16, -36];
+        k.tube([[11, -60], [15, -48], [16, -38]], 6, { fill: shirt, weight: 'detail' });
+      } else {
+        const elb = [25, -57], L = 14, sx = Math.sin(wave), sy = Math.cos(wave);
+        rh = [elb[0] + (L + 2) * sx, elb[1] - (L + 2) * sy];
+        k.tube([[11, -61], [18, -59.5], elb], 6, { fill: shirt, weight: 'detail' });              // upper arm
+        k.tube([elb, [elb[0] + L * sx, elb[1] - L * sy]], 6, { fill: shirt, weight: 'detail' });   // forearm
+      }
       k.circle(-16, -36, 3.4, { fill: skin, weight: 'fine' });
-      k.circle(rh[0], rh[1] + (wave == null ? 2 : -2), 3.4, { fill: skin, weight: 'fine' });
+      k.circle(rh[0], rh[1], 3.4, { fill: skin, weight: 'fine' });
       // torso
       const torso = geo.spline([[-11, -64], [-12.5, -50], [-12, -34, 'c'], [12, -34, 'c'], [12.5, -50], [11, -64]], true);
       draw(torso, { fill: shirt, shade: 0.35 });
