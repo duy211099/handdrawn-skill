@@ -602,13 +602,15 @@ const THEMES = {
     })(),
     allowed: ['#2B2B2B', '#C94A3A', '#E08A3C', '#E9B949', '#5B9A6E', '#A8C9B0', '#3E6A9E', '#A0703F', '#FFFDF7', '#F0CDB0', '#B9B6AF', '#3B3634', '#EBB4A3'],
     tones: { 1: '#c42032', 2: '#2a7a14', 3: '#1f5cc4', 4: '#7b3db8', 5: '#63676f' },
-    rough: 0.1, stroke: 'brush', flat: true, transparent: true, fit: 0.65, grid: '#8b877d', texture: false,
+    // Q版: one thick even line for everything (not only people) and rounded corners on every closed shape
+    rough: 0.1, stroke: 'marker', qban: true, weights: { outline: 3, detail: 1.9, fine: 1.3 },
+    flat: true, transparent: true, fit: 0.65, grid: '#8b877d', texture: false,
     card: { pinyinAbove: true, colorHanzi: false, muted: 'muted', gloss: 'muted', note: 'brick' },
   },
 };
 let THEME = THEMES.classic;
 /** The current theme's render defaults (the renderer reads these). */
-export function themeInfo() { return { transparent: !!THEME.transparent, fit: THEME.fit || 0, allowed: THEME.allowed || null, flat: !!THEME.flat }; }
+export function themeInfo() { return { transparent: !!THEME.transparent, fit: THEME.fit || 0, allowed: THEME.allowed || null, flat: !!THEME.flat, qban: !!THEME.qban }; }
 // rough: how hand-made the marks look, 0 (clean vector) … 1 (classic). Scales line wobble, pressure noise,
 // overshoot, unclosed/overrun loops, the off-register colour wash and its uneven edge, and ground-shadow flicks.
 let ROUGH = 1;
@@ -620,6 +622,7 @@ export function setTheme(name = 'classic', o = {}) {
   if (!th) throw new Error(`unknown theme ${name} (${Object.keys(THEMES).join(', ')})`);
   Object.assign(PALETTE, th.palette);
   Object.assign(TONE_INK, th.tones);
+  Object.assign(WEIGHTS, BASE_WEIGHTS, th.weights || {});
   THEME = th;
   ROUGH = o.rough != null && !Number.isNaN(+o.rough) ? clamp(+o.rough, 0, 1.5) : th.rough;
   STROKE = o.stroke === 'brush' || o.stroke === 'marker' ? o.stroke : th.stroke || 'marker';
@@ -629,6 +632,7 @@ export const themes = Object.keys(THEMES);
 /* ------------------------------------------------------------------ the kit */
 
 const WEIGHTS = { outline: 2.3, detail: 1.6, fine: 1.1, hatch: 0.9, bold: 3.2 };
+const BASE_WEIGHTS = { ...WEIGHTS };
 const LIGHT = [-Math.SQRT1_2, -Math.SQRT1_2]; // light comes from the top-left
 
 export function createKit(opts = {}) {
@@ -644,6 +648,7 @@ export function createKit(opts = {}) {
   let scope = 'root';
   const counters = { root: 0 };
   let M = [1, 0, 0, 1, 0, 0]; // affine: x' = a x + c y + e, y' = b x + d y + f
+  let VIEW = null;             // the renderer's framing matrix (k.view), undone by k.toSheet
   let groupScale = 1;
 
   let fixedSeed = null; // set by steady(): same wobble in every frame
@@ -995,9 +1000,31 @@ export function createKit(opts = {}) {
   }
 
   /** Draw a shape: wash (+ shaded side) (+ hatching) then ink. */
+  // Q版 corners: every sharp corner of a closed shape becomes a small round (radius ~7 px on the sheet, never more
+  // than a third of either edge). Done in the shape's own frame, so a part that tips or slides stays rigid.
+  function roundCorners(P, rad) {
+    const n = P.length, out = [];
+    if (n < 3) return P;
+    for (let i = 0; i < n; i++) {
+      const a = P[(i - 1 + n) % n], p = P[i], b = P[(i + 1) % n];
+      const la = dist(a, p), lb = dist(p, b);
+      if (la < 1e-6 || lb < 1e-6) { out.push(p); continue; }
+      const da = [(a[0] - p[0]) / la, (a[1] - p[1]) / la], db = [(b[0] - p[0]) / lb, (b[1] - p[1]) / lb];
+      const cos = da[0] * db[0] + da[1] * db[1];                  // −1 straight on … 1 hairpin
+      if (cos < -0.82) { out.push(p); continue; }                 // gentle bend (≤ ~35°): leave it
+      const d = Math.min(rad, la / 3, lb / 3);
+      const q0 = [p[0] + da[0] * d, p[1] + da[1] * d], q1 = [p[0] + db[0] * d, p[1] + db[1] * d];
+      for (let j = 0; j <= 4; j++) { const u = j / 4, v = 1 - u; out.push([v * v * q0[0] + 2 * u * v * p[0] + u * u * q1[0], v * v * q0[1] + 2 * u * v * p[1] + u * u * q1[1]]); }
+    }
+    return out;
+  }
   function draw(shape, o = {}) {
     shape = shapeOf(shape);
     if (!shape) return shape;
+    if (THEME.qban && shape.closed && o.sharp !== true && shape.pts.length >= 3) {
+      const sc = Math.sqrt(Math.abs(M[0] * M[3] - M[1] * M[2])) || 1;   // sheet px per local unit
+      shape = { ...shape, pts: roundCorners(shape.pts, (o.round == null ? 7 : o.round) / sc) };
+    }
     if (shape.closed && o.fill) {
       const P = fill(shape, o.fill, o);
       if (o.shade) shade(shape, o.fill, { clip: P, amount: typeof o.shade === 'number' ? o.shade : undefined, depth: o.shadeDepth });
@@ -1267,7 +1294,11 @@ export function createKit(opts = {}) {
     geo,
     draw, fill, ink, shade, hatch,
     group, scope: scoped,
-    toSheet: (x, y) => tx([x, y]),
+    // a point in the scene's own frame (what the scene draws in): inside the renderer's auto-framing (k.view) this
+    // undoes the framing, so points returned by pieces can be drawn at directly
+    toSheet: (x, y) => { const p = tx([x, y]); if (!VIEW) return p; const [a, b, c, d, e, f] = VIEW, det = a * d - b * c; return [(d * (p[0] - e) - c * (p[1] - f)) / det, (-b * (p[0] - e) + a * (p[1] - f)) / det]; },
+    /** The renderer's framing: like group(o, fn), and it becomes the scene's frame for k.toSheet. */
+    view(o, fn) { return group(o, () => { const prev = VIEW; VIEW = M.slice(); try { return fn(); } finally { VIEW = prev; } }); },
     rand(a = 0, b = 1) { return lerp(a, b, shapeRng()()); },
     pick(arr) { return arr[Math.floor(shapeRng()() * arr.length)]; },
     lerp, clamp,
@@ -1550,6 +1581,41 @@ function installPieces(k, I) {
       return { head: k.toSheet(-36, -28), top: k.toSheet(0, -48), tail: k.toSheet(-32, -6) };
     }));
 
+    // Q版 sitting cat (the default look): the head is as big as the body, the body a small round bean, stubby paws,
+    // round-tipped ears, dot eyes with a shine, blush, a 'ω' mouth. The tail swings after a little hop of the body
+    // (k.follow) when animated. o.qban: false gives the classic proportions.
+    if (THEME.qban && o.qban !== false) return group({ x, y: groundY, scale: size / 100, flipX: o.facing === 'left' }, () => scoped('cat-q', () => {
+      const OW = o.weight || 'bold';
+      if (o.shadow !== false) k.shadow(2, 0, 40, 5, { lines: 2 });
+      const tailA = o.animate ? k.follow(t, (u) => 14 * Math.sin(TAU * u), { key: 'qcat-tail', f: 1.6, z: 0.35 }) : 0;
+      const ta = (tailA * Math.PI) / 180, piv = [22, -8];
+      const rot = ([px, py]) => [piv[0] + (px - piv[0]) * Math.cos(ta) - (py - piv[1]) * Math.sin(ta), piv[1] + (px - piv[0]) * Math.sin(ta) + (py - piv[1]) * Math.cos(ta)];
+      const tip = rot([46, -40]);
+      k.tube([[16, -6], rot([36, -8]), rot([46, -22]), tip], [9, 8], { fill: fillC, weight: OW });
+      // body: a small round bean
+      draw(geo.spline([[-26, 0, 'c'], [-30, -14], [-22, -32], [0, -38], [22, -32], [30, -14], [26, 0, 'c']], true), { fill: fillC, weight: OW });
+      if (o.bib !== false) k.spline([[-10, -34], [-12, -20], [0, -12], [12, -20], [10, -34]], { closed: true, fill: o.bibFill || 'paperwhite', ink: false });
+      for (const sd of [-1, 1]) k.ellipse(sd * 11, -3.5, 9, 5.5, { fill: fillC, weight: OW });            // paws
+      // ears: rounded triangles, behind the head
+      for (const sd of [-1, 1]) {
+        k.poly([[sd * 34, -66], [sd * 30, -100], [sd * 10, -86]], { fill: fillC, weight: OW, round: 9 });
+        k.poly([[sd * 29, -72], [sd * 27.5, -92], [sd * 16, -84]], { fill: 'pink', ink: false, round: 5 });
+      }
+      // head: big and round, a little wider than tall
+      draw(geo.blob(0, -64, 38, { squash: 0.86, irregular: 0.01 }), { fill: fillC, weight: OW });
+      if (o.stripes !== false) for (const sx of [-7, 0, 7]) k.line([[sx, -95], [sx * 1.1, -87]], { weight: 'detail' });
+      const eyes = o.eyes || 'open', blink = o.animate && t > 0.86 && t < 0.92;
+      if (eyes === 'closed' || blink) for (const sd of [-1, 1]) k.arc(sd * 14, -64, 5.5, 3.6, 20, 160, { weight: 'detail' });
+      else for (const sd of [-1, 1]) { k.dot(sd * 14, -64, 4.4); k.dot(sd * 14 + 1.4, -66, 1.4, { fill: 'white' }); }
+      k.poly([[-2.4, -57.5], [2.4, -57.5], [0, -55]], { fill: 'pink', weight: 'fine' });
+      k.spline([[-6, -52], [-3, -50], [0, -52.6], [3, -50], [6, -52]], { weight: 'detail' });
+      for (const sd of [-1, 1]) {
+        k.ellipse(sd * 23, -55, 6, 3.4, { fill: 'blush', ink: false });
+        k.line([[sd * 31, -58], [sd * 44, -61]], { weight: 'fine' });
+        k.line([[sd * 31, -54], [sd * 44, -53]], { weight: 'fine' });
+      }
+      return { head: k.toSheet(0, -64), top: k.toSheet(0, -100), tail: k.toSheet(...tip), paws: k.toSheet(0, -3) };
+    }));
     return group({ x, y: groundY, scale: size / 100, flipX: o.facing === 'left' }, () => scoped('cat-sit', () => {
       if (o.shadow !== false) k.shadow(4, 0, 42, 5, { lines: 2 });
       // tail: behind the body, sweeping out to the right and curling up
@@ -1747,7 +1813,7 @@ function installPieces(k, I) {
     return { poly: P, surface: onLine.length >= 2 ? [onLine[0], onLine[onLine.length - 1]] : null };
   };
 
-  /* ---- chibi person ----
+  /* ---- Q版 person ----
    * Big head, bean body, short tapered limbs: reads at flashcard size and suits 简笔画. Local units: 100 = height.
    *   head: head height as a share of the whole (0.33 … 0.5, default 0.4)
    *   expression: 'neutral' | 'happy' | 'closed' | 'tired' | 'surprised' | 'sad' | 'angry' | 'scared'

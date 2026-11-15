@@ -197,7 +197,7 @@ async function renderVocab(v) {
       place = { scale: sc, x: W / 2 - sc * cx, y: H / 2 - sc * cy };
     }
   }
-  const drawPicture = (k, t) => (place ? k.group(place, () => scene.draw(k, t)) : scene.draw(k, t));
+  const drawPicture = (k, t) => (place ? k.view(place, () => scene.draw(k, t)) : scene.draw(k, t));
 
   // colour check: prefer the theme's palette, warn about others, and about more than 4 colours
   const allowed = themeInfo().allowed;

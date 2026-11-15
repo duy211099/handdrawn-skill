@@ -4,9 +4,10 @@ Ask Claude for a picture ("a teapot", "a kid drinking water", "một bát phở"
 self-contained **looping animated SVG** (frames switched by CSS, no script: it plays in browsers and `<img>` tags),
 plus a PNG still and, if you want, a GIF.
 
-**One look, two skills.** Both draw in the same default style, **简笔画 + Q版**: objects as 简笔画 (Chinese
-simple-stroke drawing) with flat traditional colours and a clean warm-ink outline; people as Q版 (chibi): big
-heads, dot eyes, blush. Same palette, same ink, same chibi in 2D and 3D, so pictures from either sit side by side.
+**One look, two skills.** Both draw in the same default style, **简笔画 + Q版**, and everything is Q版: objects as
+简笔画 (Chinese simple-stroke drawing) with flat traditional colours, squat chunky shapes, rounded corners and one
+thick even outline (no faces on objects); people and animals as Q版: big
+heads, dot eyes, blush. Same palette, same ink, same Q版 characters in 2D and 3D, so pictures from either sit side by side.
 The original ink-and-marker look on cream paper is `--theme classic` in both.
 
 | skill | what it draws | when Claude uses it |
@@ -16,7 +17,7 @@ The original ink-and-marker look on cream paper is `--theme classic` in both.
 
 Both skills carry the same ordered **"2D or 3D?"** rule in their descriptions, so Claude picks one and says so.
 
-## Demo: the same five prompts, 2D and 3D
+## Demo: the same eight prompts, 2D and 3D
 
 Rendered with `bash docs/demo/build.sh` (default look, on paper). Click a picture for the animated SVG.
 
@@ -26,9 +27,13 @@ Rendered with `bash docs/demo/build.sh` (default look, on paper). Click a pictur
 | an apple with a leaf | [<img src="docs/demo/2d-apple.png" width="220" alt="2D apple">](docs/demo/2d-apple.svg) | [<img src="docs/demo/3d-apple.png" width="220" alt="3D apple, the leaf flutters">](docs/demo/3d-apple.svg) |
 | a leafy plant in a pot | [<img src="docs/demo/2d-plant.png" width="220" alt="2D potted plant">](docs/demo/2d-plant.svg) | [<img src="docs/demo/3d-plant.png" width="220" alt="3D potted plant, stems sway">](docs/demo/3d-plant.svg) |
 | a small house with a tree | [<img src="docs/demo/2d-house.png" width="220" alt="2D house with a tree">](docs/demo/2d-house.svg) | [<img src="docs/demo/3d-house.png" width="220" alt="3D house, smoke and a swaying tree">](docs/demo/3d-house.svg) |
-| a kid drinking a glass of water | [<img src="docs/demo/2d-drink.png" width="220" alt="2D chibi with a glass">](docs/demo/2d-drink.svg) | [<img src="docs/demo/3d-drink.png" width="220" alt="3D chibi drinking">](docs/demo/3d-drink.svg) |
+| a cat sitting on a cushion | [<img src="docs/demo/2d-cat.png" width="220" alt="2D Q版 cat">](docs/demo/2d-cat.svg) | [<img src="docs/demo/3d-cat.png" width="220" alt="3D Q版 cat, the tail swings">](docs/demo/3d-cat.svg) |
+| a kid drinking a glass of water | [<img src="docs/demo/2d-drink.png" width="220" alt="2D Q版 kid with a glass">](docs/demo/2d-drink.svg) | [<img src="docs/demo/3d-drink.png" width="220" alt="3D Q版 kid drinking">](docs/demo/3d-drink.svg) |
+| lựa chọn (选择, abstract) | [<img src="docs/demo/2d-choose.png" width="220" alt="2D card: a fork in the road, a Q版 kid thinking, 选择">](docs/demo/2d-choose.svg) | [<img src="docs/demo/3d-choose.png" width="220" alt="3D: a Q版 kid at a fork, looking down each road">](docs/demo/3d-choose.svg) |
+| kỷ luật (纪律, abstract) | [<img src="docs/demo/2d-discipline.png" width="220" alt="2D card: alarm clock at 6:00, a Q版 kid stretching, 纪律">](docs/demo/2d-discipline.svg) | [<img src="docs/demo/3d-discipline.png" width="220" alt="3D: alarm clock ringing, a Q版 kid stretching">](docs/demo/3d-discipline.svg) |
 
-Where 3D wins: the drinking kid. The glass comes *toward* the face, which 2D can only fake (the glass slides
+Abstract words are vocab cards in 2D (picture + characters, pinyin, Hán-Việt, meaning); 3D draws the same
+metaphor as a scene. Where 3D wins: the drinking kid. The glass comes *toward* the face, which 2D can only fake (the glass slides
 across the cheek); in 3D the arm, glass and head share one space and line up by construction.
 
 ### The classic look (`--theme classic`)
@@ -131,13 +136,15 @@ handdrawn/                  2D skill
   assets/kit.js             the drawing kit (plain JS, no deps, Node + browser)
   assets/render.mjs         scene → animated SVG / PNG / thumbnail / GIF
   assets/gif.mjs            tiny GIF encoder (median-cut palette, ordered dither, LZW)
-  examples/                 cup, apple, cat, plant, house, meal, vocab-* (Chinese words; vocab-drink = physics)
+  examples/                 cup, apple, cat, plant, house, meal, vocab-* (Chinese words; vocab-drink = physics,
+                            vocab-discipline = 纪律)
   references/kit.md         every kit function
 handdrawn-3d/               3D skill (same layout)
   assets/kit.js             the 2D kit's ink, wash, font and themes + a 3D layer: camera, solids, shading,
                             sorting, k.chibi, k.mesh, k.follow
   assets/render.mjs         also measures every frame for stable framing; --strip for a contact sheet
-  examples/                 cup, apple, plant, house, teapot, toaster, windmill, drink (chibi + IK + water)
+  examples/                 cup, apple, plant, house, cat, teapot, toaster, windmill, drink (Q版 person + IK +
+                            water), choose, discipline
 docs/demo/                  the 2D vs 3D demo: scenes/, build.sh, rendered SVG + PNG
 tests/                      verify.sh + test sheets
 ```

@@ -1,6 +1,6 @@
 ---
 name: handdrawn
-description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 (chibi) people by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead when the user asks for 3D / isometric, when a person acts in depth (drinking, eating, reaching toward the viewer), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (a toaster popping, a drawer sliding out, a windmill turning). Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 people and animals by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead when the user asks for 3D / isometric, when a person acts in depth (drinking, eating, reaching toward the viewer), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (a toaster popping, a drawer sliding out, a windmill turning). Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn
@@ -32,7 +32,7 @@ Decide before drawing, in this order. The first rule that matches wins:
    brings something toward or away from the body (drinking, eating, a phone to the ear, putting on a hat,
    reaching forward), 2D can only fake it: the object slides across the face in the picture plane. 3D puts arm,
    object and head in one space (`k.chibi` with `reach` in the 3D kit; see `handdrawn-3d/examples/drink.js`).
-   The same Q版 chibi in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
+   The same Q版 person in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
 4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
 5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
    machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
@@ -156,7 +156,18 @@ Shēng design system:
 - Cinnabar, malachite and azurite are close to tone 1, 2 and 3: use them only when the thing really is that
   colour.
 - Example set: `vocab-tea`, `vocab-baozi`, `vocab-apple`, `vocab-cup`, `vocab-cat`, `vocab-drink`.
-- **People are Q版 (Q-version, chibi): use `k.chibi`, not `k.person`.**
+**Q版 everything (the default look).** Not only people: every subject is drawn Q版.
+- **People** are `k.chibi`; **cats** are `k.cat` (head as big as the body). Other animals: the same recipe, a big
+  round head (≥ the body), a small bean body, stubby limbs, dot eyes with a shine, blush.
+- **Objects get a Q版 shape, never a face:** squat and chunky (height ≈ width), rounded corners, thick even
+  outline, few big parts instead of many small ones (a fat handle, a big lid knob). The kit already rounds every
+  corner and draws one even line; you choose the squat, chunky proportions. No eyes or mouths on objects: a cup
+  with a face reads as a character, not as 杯子.
+- **Q版 arms are short** (shorter than the head is tall): a stretch or a cheer is a wide V, not arms overhead.
+- Never get the Q版 shape by squashing the whole picture: a part that tips or turns would shear. Build the
+  proportions into each part.
+
+- **People are Q版: use `k.chibi`, not `k.person`.**
   - Proportions: 2–2.5 heads tall (`head` 0.4–0.5, default 0.45).
   - Face: solid dot eyes, a small curved smile, round pink blush, no nose.
   - Hair: big, chunky, rounded hair that owns the silhouette, with one flat highlight.
@@ -205,6 +216,7 @@ consistent (the person is always `k.chibi`, objects are plain 简笔画):
 | 选择 choose, 决定 decide | a fork in the road with a signpost, a person thinking (`examples/vocab-choose.js`) |
 | 习惯 habit, 每天 every day, 坚持 keep at it | a calendar filling with ticks, one per day (`examples/vocab-habit.js`) |
 | 希望 hope | a sprout under a rising sun (`examples/vocab-hope.js`) |
+| 纪律 discipline, 准时 on time, 规律 routine | an alarm clock ringing at 6:00, the Q版 kid already up doing morning stretches (`examples/vocab-discipline.js`; 3D: `handdrawn-3d/examples/discipline.js`) |
 | 因为…所以 because…so | two dominoes: the first tips the second (cause → effect) |
 | 但是 but, 可是 however | a path that turns sharply / a person stopping at a wall |
 | 比较 compare, 更 more | a balance scale, one side lower |
