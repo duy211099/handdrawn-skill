@@ -41,6 +41,7 @@ sharp creases lighter. Every call returns a **handle** `{ box: {min, max}, top, 
 | `k.panel(points, o)` | flat polygon through 3D points: a sign, a sail, a page, a blade. `{ thick: 3 }` gives it thickness. `{ on: handle }` makes it a **decal** on that solid's face (a door, a slot, a label, a window): drawn with the solid, hidden when that face turns away |
 | `k.line(points, o)` | an ink line through 3D points: seams, grooves, a lid gap, a crack, planks. `{ on: handle, normal: [x, y, z] }` draws it with that solid and hides it when the normal faces away. `{ smooth: true }`, `{ closed: true }`, `{ weight }` |
 | `k.chibi(at, { turn, h: 210, headTilt, expression, shirt, pants, shoes, hair, skin, reach, rightPole, leftPole })` | the **Q版 person** (same character as the 2D `k.chibi`): big head, bean body, stubby limbs, eyes and blush painted on the face. Faces −y before `turn` (degrees about z). `headTilt` + = looks up (about the neck). `expression: 'neutral'\|'closed'\|'happy'`. `reach: { right: [x, y, z], left }` puts that hand there by a two-bone IK in 3D with a pole (`rightPole` default out and down: never flips); otherwise the arm hangs. Returns `{ mouth, head, headR, neck, shoulderR, shoulderL, handR, handL, elbowR, elbowL, unit }` |
+| `k.cat(at, { turn, h: 150, fill: 'orange', bib, eyes: 'open'\|'closed', tail, headTilt })` | the **Q版 cat**, sitting (same character as the 2D `k.cat`): head as big as the body, round body, stubby paws, round-tipped ears, face painted on. `tail` = swing in degrees (drive it with `k.follow`). Returns `{ head, top, tail }` |
 | `k.chibiLayout(at, o)` | the same anchors **without drawing** (to place a glass at the mouth before drawing the person who holds it) |
 | `k.mesh(V, F, o)` | any closed mesh: `V` = `[[x, y, z], …]`, `F` = faces as index lists sharing vertices. For shapes the primitives can't make, e.g. water in a tipped glass cut by its level surface (`in: glass`; see `examples/drink.js`) |
 | `k.shapes.*` | 2D outlines for `extrude`: `rect(w, h)`, `roundRect(w, h, r)`, `circle(r, n)`, `ellipse(rx, ry, n)`, `spline([[u, v], …])` (closed, smooth) |
@@ -117,7 +118,7 @@ Text uses a built-in hand-drawn stroke font: Latin and **full Vietnamese** (`'ph
 
 ## Colour
 
-Themes: `jianbihua` (default, matches the 2D skill: traditional palette, clean ink, transparent) and `classic`
+Themes: `jianbihua` (default, matches the 2D skill: traditional palette, one thick even Q版 outline, boxes with soft corners, transparent) and `classic`
 (marker on cream paper). `--theme`, `sheet.theme`, `--rough 0..1`, `--opaque`. In `jianbihua` the names below map
 to the traditional colours (`red` → cinnabar, `orange` → persimmon, `green` → malachite, `blue` → azurite …), and
 `cinnabar, persimmon, gamboge, malachite, celadon, azurite, ochre, paperwhite, hair` also work.

@@ -83,7 +83,7 @@ function toMesh(polys) {
   return { V, F };
 }
 
-// ---- the person: the kit's Q版 chibi (facing -y). k.chibiLayout gives the mouth before drawing.
+// ---- the person: the kit's Q版 person, k.chibi (facing -y). k.chibiLayout gives the mouth before drawing.
 const WHO = { shirt: 'orange', pants: 'blue', expression: 'neutral' };
 // drinking starts when the water reaches the near rim: find that tilt once (level surface), then tip a little past it
 const WET_TILT = (() => {

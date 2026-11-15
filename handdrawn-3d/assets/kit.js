@@ -414,7 +414,8 @@ const THEMES = {
         ...as('azurite', 'sky', 'blue', 'navy', 'lilac', 'plum'),
         ...as('paperwhite', 'white', 'cream'), ...as('grey', 'stone'), ...as('blush', 'pink') };
     })(),
-    rough: 0.1, transparent: true, texture: false, light: 0.04, dark: 0.08,
+    // Q版: one thick even line (small parts get the same outline as big ones) and soft rounded boxes
+    rough: 0.1, transparent: true, texture: false, light: 0.04, dark: 0.08, qban: true, weights: { outline: 3, detail: 1.9, fine: 1.3 },
   },
 };
 let THEME = THEMES.jianbihua;
@@ -424,6 +425,7 @@ export function setTheme(name = 'jianbihua', o = {}) {
   const th = THEMES[name];
   if (!th) throw new Error(`unknown theme ${name} (${Object.keys(THEMES).join(', ')})`);
   Object.assign(PALETTE, th.palette);
+  Object.assign(WEIGHTS, BASE_WEIGHTS, th.weights || {});
   THEME = th;
   ROUGH = o.rough != null && !Number.isNaN(+o.rough) ? clamp(+o.rough, 0, 1.5) : th.rough;
 }
@@ -433,6 +435,8 @@ export const themes = Object.keys(THEMES);
 /* ------------------------------------------------------------------ the kit */
 
 const WEIGHTS = { outline: 2.3, detail: 1.6, fine: 1.1, hatch: 0.9, bold: 3.2 };
+const BASE_WEIGHTS = { ...WEIGHTS };
+setTheme("jianbihua");   // the default look, also when the kit is used without render.mjs
 const LIGHT = [-Math.SQRT1_2, -Math.SQRT1_2]; // light comes from the top-left
 
 export function createKit(opts = {}) {
@@ -1046,6 +1050,7 @@ export function createKit(opts = {}) {
   function weightFor(item) {
     if (item.o.weight) return [item.o.weight, item.o.creaseWeight || 'fine'];
     const P = item.V.map(proj), b = bboxOf(P), d = Math.hypot(b.w, b.h);
+    if (THEME.qban) return d > 40 ? ['outline', 'detail'] : ['detail', 'fine'];   // Q版: one even outline
     if (d > 170) return ['outline', 'detail'];
     if (d > 70) return ['detail', 'fine'];
     return ['fine', 0.9];
@@ -1379,6 +1384,7 @@ export function createKit(opts = {}) {
     /** Box. at = centre of the bottom face, size = [w (x), d (y), h (z)]. { round: r } rounds the vertical edges. */
     box(at, size, o = {}) {
       const [w, d, h] = size;
+      if (THEME.qban && o.round == null) o = { ...o, round: Math.min(w, d) * 0.12 };   // Q版: soft corners
       const poly = o.round ? roundRectPoly(-w / 2, -d / 2, w / 2, d / 2, Math.min(o.round, w / 2, d / 2)) : [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]];
       const m = prismMesh(poly, 0, h);
       return addMesh(place(m.V, at, o.axis || 'z'), m.F, solidOpts({ ...o, at }), 'box');
@@ -1526,7 +1532,7 @@ export function createKit(opts = {}) {
   const title0 = k.title;
   k.title = (...a) => { hasTitle = true; return title0(...a); };
 
-  /* ---- Q版 (chibi) person, the same character as the 2D kit's k.chibi, built from solids ----
+  /* ---- Q版 person, the same character as the 2D kit's k.chibi, built from solids ----
    * Big head (~45% of the height), bean body, stubby limbs, dot eyes and blush painted on the face (decals, so they
    * turn with the head and hide when it faces away). Local frame: facing −y, feet on z = 0, ~210 units tall at h 210.
    *   at [x, y, z], turn (degrees about z: 0 faces the viewer's front), h (height), headTilt (degrees, + = look up),
@@ -1545,6 +1551,52 @@ export function createKit(opts = {}) {
     // the head turns about the neck, about x: + headTilt lifts the face
     const tipHead = (p) => { const d = sub3(p, CH.neck), cl = Math.cos(-look), sl = Math.sin(-look); return add3(CH.neck, [d[0], cl * d[1] - sl * d[2], sl * d[1] + cl * d[2]]); };
     return { sc, toW, toL, tipHead };
+  };
+  /* ---- Q版 cat, sitting: the same character as the 2D k.cat (head as big as the body, round body, stubby paws,
+   * round-tipped ears, dot eyes, blush, a 'ω' mouth). Local frame: facing −y, ~150 tall at h 150.
+   *   k.cat(at, { turn, h: 150, fill: 'orange', bib: true, eyes: 'open'|'closed', tail: degrees (sway it with
+   *   k.follow), headTilt (degrees, + = looks up) }) → { head, top, tail } */
+  k.cat = (at = [0, 0, 0], o = {}) => {
+    const sc = (o.h || 150) / 150, fill = o.fill || 'orange', R = 40, HC = [0, -4, 96];
+    const out = {};
+    group3({ at, rotate: { z: o.turn || 0 }, scale: sc }, () => {
+      // tail: from behind the body, curling up; swings about its root
+      group3({ about: [0, 22, 14], rotate: { y: o.tail || 0 } }, () => {
+        k.tube([[0, 14, 14], [10, 38, 10], [30, 44, 26], [34, 38, 52]], [8, 7], { fill });
+      });
+      const body = k.sphere([0, 2, 28], 32, { fill, scale: [1, 0.9, 0.95] });         // body
+      if (o.bib !== false) {                                                          // a white bib painted on the chest
+        const pts = [];
+        for (let i = 0; i < 14; i++) { const q = (i / 14) * TAU, x = 13 * Math.cos(q), z = 36 + 15 * Math.sin(q); const v = (z - 28) / (32 * 0.95), u = x / 32; pts.push([x, 2 - 32 * 0.9 * Math.sqrt(Math.max(0, 1 - u * u - v * v)) - 0.4, z]); }
+        k.panel(pts, { on: body, fill: 'paperwhite', flat: true, ink: false });
+      }
+      for (const sd of [-1, 1]) k.sphere([sd * 13, -24, 6], 10, { fill, scale: [1, 1.3, 0.62] });   // paws
+      group3({ about: [0, 0, 60], rotate: { x: -(o.headTilt || 0) } }, () => {
+        for (const sd of [-1, 1]) {                                                   // ears: round-tipped cones
+          k.cylinder([sd * 22, 2, 118], 13, 24, { fill, r2: 4, rotate: { y: sd * 14 }, pivot: [sd * 22, 2, 118] });
+        }
+        const head = k.sphere(HC, R, { fill, scale: [1.08, 0.95, 0.9] });
+        const sx = 1.08, sz = 0.9;
+        const onHead = (x, z) => { const u = x / (R * sx), v = (z - HC[2]) / (R * sz); return [x, HC[1] - R * 0.95 * Math.sqrt(Math.max(0, 1 - u * u - v * v)) - 0.4, z]; };
+        const disc = (cp, rx, rz, n = 12) => {
+          const nn = unit3([cp[0] / (sx * sx), (cp[1] - HC[1]) / (0.95 * 0.95), (cp[2] - HC[2]) / (sz * sz)]), e1 = unit3(cross3([0, 0, 1], nn)), e2 = cross3(nn, e1);
+          return Array.from({ length: n }, (_, i) => { const q = (i / n) * TAU; return add3(cp, add3(mul3(e1, rx * Math.cos(q)), mul3(e2, rz * Math.sin(q)))); });
+        };
+        for (const sd of [-1, 1]) {
+          const e = onHead(sd * 15, 98);
+          if (o.eyes === 'closed') k.line([onHead(sd * 15 - 6, 99), onHead(sd * 15, 96), onHead(sd * 15 + 6, 99)], { on: head, normal: [0, -1, 0], smooth: true, weight: 'detail' });
+          else { k.panel(disc(e, 5, 5.5), { on: head, fill: 'ink', flat: true, ink: false }); k.panel(disc(add3(onHead(sd * 15 + 1.6, 100.5), [0, -0.3, 0]), 1.6, 1.6, 8), { on: head, fill: 'white', flat: true, ink: false }); }
+          k.panel(disc(onHead(sd * 25, 88), 6.5, 3.8), { on: head, fill: 'blush', flat: true, ink: false });
+          k.line([onHead(sd * 30, 91), add3(onHead(sd * 30, 91), [sd * 16, -4, 2])], { weight: 'fine' });   // whiskers
+          k.line([onHead(sd * 30, 87), add3(onHead(sd * 30, 87), [sd * 16, -4, -2])], { weight: 'fine' });
+        }
+        k.panel(disc(onHead(0, 91), 2.6, 1.8, 3), { on: head, fill: 'pink', flat: true, ink: false });   // nose
+        k.line([onHead(-6, 86), onHead(-3, 84), onHead(0, 86), onHead(3, 84), onHead(6, 86)], { on: head, normal: [0, -1, 0], weight: 'detail' });
+        out.head = HC; out.top = [0, 0, 146];
+      });
+    });
+    const a = ((o.turn || 0) * Math.PI) / 180, toW = (p) => [at[0] + sc * (Math.cos(a) * p[0] - Math.sin(a) * p[1]), at[1] + sc * (Math.sin(a) * p[0] + Math.cos(a) * p[1]), at[2] + sc * p[2]];
+    return { head: toW(out.head), top: toW(out.top), tail: toW([34, 38, 52]) };
   };
   k.chibiLayout = (at = [0, 0, 0], o = {}) => {
     const X = chibiXf(at, o), R = CH.headR;
