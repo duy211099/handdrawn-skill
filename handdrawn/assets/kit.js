@@ -31,6 +31,52 @@ const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+
+/* -------------------- timing (Apple-style)
+ * Springs, the way SwiftUI describes them: a perceptual `duration` and a `bounce` (0 = no overshoot).
+ *   smooth = bounce 0 (SwiftUI .smooth, the default)   snappy = bounce 0.15   bouncy = bounce 0.3
+ * A critically damped spring starts at rest, moves quickly, then settles gently: calm on the eyes.
+ * Plus the Core Animation curves as cubic-béziers (easeInOut 0.42,0,0.58,1; default 0.25,0.1,0.25,1). */
+function springCurve(bounce = 0) {
+  const zeta = 1 - clamp(bounce, 0, 0.9), w = 2 * Math.PI * 1.25; // settles (≈99.5%) by p = 1
+  const raw = (p) => {
+    if (zeta >= 1) return 1 - (1 + w * p) * Math.exp(-w * p);
+    const wd = w * Math.sqrt(1 - zeta * zeta);
+    return 1 - Math.exp(-zeta * w * p) * (Math.cos(wd * p) + ((zeta * w) / wd) * Math.sin(wd * p));
+  };
+  const end = raw(1);
+  return (p) => (p <= 0 ? 0 : p >= 1 ? 1 : raw(p) / end);
+}
+function bezierCurve(x1, y1, x2, y2) {
+  const B = (a, b, t) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+  return (x) => {
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (B(x1, x2, m) < x) lo = m; else hi = m; }
+    return B(y1, y2, (lo + hi) / 2);
+  };
+}
+const EASE = {
+  linear: (p) => clamp(p, 0, 1),
+  smooth: springCurve(0), snappy: springCurve(0.15), bouncy: springCurve(0.3),
+  easeInOut: bezierCurve(0.42, 0, 0.58, 1), easeOut: bezierCurve(0, 0, 0.58, 1), easeIn: bezierCurve(0.42, 0, 1, 1),
+  default: bezierCurve(0.25, 0.1, 0.25, 1),
+  sine: (p) => (1 - Math.cos(Math.PI * clamp(p, 0, 1))) / 2,
+};
+/**
+ * One loop as beats: motion(t, [[value, beats, ease?], …]) starts at the LAST value (so it loops) and moves to each
+ * value in turn over its share of the loop; an entry with the same value as before is a hold.
+ *   motion(t, [[0, 1], [1, 2, 'smooth'], [1, 1.5], [0, 2, 'smooth']])  → rest, lift, hold, lower
+ */
+function motion(t, beats) {
+  const total = beats.reduce((a, b) => a + b[1], 0);
+  let x = (((t % 1) + 1) % 1) * total, from = beats[beats.length - 1][0];
+  for (const [to, len, ease] of beats) {
+    if (x <= len) { const e = (EASE[ease] || EASE.smooth)(len ? x / len : 1); return from + (to - from) * e; }
+    x -= len; from = to;
+  }
+  return beats[beats.length - 1][0];
+}
 const fmt = (n) => { const r = Math.round(n * 10) / 10; return (r === 0 ? 0 : r).toString(); };
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
@@ -170,6 +216,12 @@ const PALETTE = {
   lilac: '#bba8cf', plum: '#9c7598', pink: '#efb3ac', blush: '#f3c4b8', sand: '#e3d0a9',
   wood: '#c99d6e', brown: '#a07757', chocolate: '#7e5c46', grey: '#b5afa5', stone: '#d0c9bd',
   charcoal: '#6d665f', white: '#fbf8f1', shadow: '#d9ccb3', skin: '#f2cdb0', tan: '#d9a77f',
+  hair: '#7e5c46', rice: '#fbfaf4', tea: '#d2c886', celadon: '#b3d6cf', jade: '#6fa8a0',
+  // traditional Chinese colours (中国传统色), as soft marker tones. English or Chinese name, same colour.
+  gamboge: '#e8c15f', indigo: '#6f84a3', dai: '#4f5a66', moonwhite: '#e4edef', ivory: '#f1e6cb',
+  ink1: '#d6d5d1', ink2: '#a8a9a6', ink3: '#737674',
+  '藤黄': '#e8c15f', '赭石': '#ddb25f', '花青': '#6f84a3', '黛': '#4f5a66', '月白': '#e4edef', '牙色': '#f1e6cb',
+  '青瓷': '#b3d6cf', '朱砂': '#d36b5a', '石绿': '#8fbf9f', '石青': '#6f97c4', '墨': '#3b3634',
 };
 // chromatic pigments that arbitrary colours are pulled toward
 const PIGMENTS = ['red', 'coral', 'orange', 'ochre', 'yellow', 'sage', 'green', 'leaf', 'teal', 'sky', 'blue', 'navy', 'lilac', 'plum', 'pink', 'wood', 'brown'];
@@ -465,6 +517,65 @@ function pinyinSyllables(str, want) {
 // Pleco-style tone colours, deep enough to read as ink
 const TONE_INK = { 1: '#b8473b', 2: '#c27a2c', 3: '#4d8a46', 4: '#3f64a8', 5: '#6d665f' };
 
+/* -------------------- themes
+ * classic: cream paper with a faint mottle, warm brown-black ink, hanzi coloured by tone, pinyin under the hanzi.
+ * sheng:   the Shēng design system. Paper = `surface` #f7f6f2, flat (no texture); ink = `ink` #191d24; muted text =
+ *          `ink-muted`; tones = Pleco colours (1 red, 2 green, 3 blue, 4 purple, neutral gray) on the PINYIN only,
+ *          hanzi stay ink; pinyin stacks ABOVE the hanzi, then Hán-Việt and the meaning under it.
+ * One theme per process (the renderer calls setTheme once before drawing). */
+const THEMES = {
+  classic: {
+    palette: { ink: '#2c2620', paper: '#f4ecdc', shadow: '#d9ccb3', charcoal: '#6d665f', brick: '#bf5a4c', hair: '#7e5c46' },
+    tones: { 1: '#b8473b', 2: '#c27a2c', 3: '#4d8a46', 4: '#3f64a8', 5: '#6d665f' },
+    rough: 1, grid: '#d99a8c', texture: true, card: { pinyinAbove: false, colorHanzi: true, muted: 'charcoal', gloss: undefined, note: 'brick' },
+  },
+  sheng: {
+    palette: { ink: '#191d24', paper: '#f7f6f2', shadow: '#dedbd3', charcoal: '#575d68', brick: '#46546a',
+               muted: '#575d68', jade: '#6fa8a0', celadon: '#b3d6cf', hair: '#3b3634' }, // black hair: people in China
+    tones: { 1: '#c42032', 2: '#2a7a14', 3: '#1f5cc4', 4: '#7b3db8', 5: '#63676f' },
+    rough: 0.4, grid: '#8b877d', texture: false, card: { pinyinAbove: true, colorHanzi: false, muted: 'muted', gloss: 'muted', note: 'brick' },
+  },
+  // 简笔画 colour simple-stroke drawing: flat fills (no shading or hatching), a soft brush outline in warm ink, a small
+  // set of traditional colours. Transparent by default (sits on the app's surface); --opaque gives the #F6EFE2 paper.
+  jianbihua: {
+    palette: (() => {
+      const C = { cinnabar: '#C94A3A', persimmon: '#E08A3C', gamboge: '#E9B949', malachite: '#5B9A6E', celadon: '#A8C9B0',
+        azurite: '#3E6A9E', ochre: '#A0703F', paperwhite: '#FFFDF7', skin: '#F0CDB0', grey: '#B9B6AF', hair: '#3B3634', blush: '#EBB4A3' };
+      const as = (name, ...keys) => Object.fromEntries(keys.map((k) => [k, C[name]]));
+      return { ...C, ink: '#2B2B2B', paper: '#F6EFE2', shadow: '#E3D8C4', charcoal: '#3B3634', muted: '#575d68', brick: '#46546a',
+        ...as('cinnabar', 'red', '朱砂'), ...as('persimmon', 'coral', 'orange'),
+        ...as('gamboge', 'yellow', 'sand', '藤黄'), ...as('ochre', 'wood', 'brown', 'chocolate', 'tan', '赭石'),
+        ...as('malachite', 'green', 'leaf', 'olive', '石绿'), ...as('celadon', 'sage', 'mint', 'teal', 'jade', 'tea', '青瓷'),
+        ...as('azurite', 'sky', 'blue', 'navy', 'indigo', 'lilac', 'plum', '石青', '花青'),
+        ...as('paperwhite', 'white', 'cream', 'rice', 'moonwhite', 'ivory', '月白', '牙色'),
+        ...as('grey', 'stone', 'ink1', 'ink2'), ...as('hair', 'ink3', 'dai', '黛', '墨'), ...as('blush', 'pink') };
+    })(),
+    allowed: ['#2B2B2B', '#C94A3A', '#E08A3C', '#E9B949', '#5B9A6E', '#A8C9B0', '#3E6A9E', '#A0703F', '#FFFDF7', '#F0CDB0', '#B9B6AF', '#3B3634', '#EBB4A3'],
+    tones: { 1: '#c42032', 2: '#2a7a14', 3: '#1f5cc4', 4: '#7b3db8', 5: '#63676f' },
+    rough: 0.1, stroke: 'brush', flat: true, transparent: true, fit: 0.65, grid: '#8b877d', texture: false,
+    card: { pinyinAbove: true, colorHanzi: false, muted: 'muted', gloss: 'muted', note: 'brick' },
+  },
+};
+let THEME = THEMES.classic;
+/** The current theme's render defaults (the renderer reads these). */
+export function themeInfo() { return { transparent: !!THEME.transparent, fit: THEME.fit || 0, allowed: THEME.allowed || null, flat: !!THEME.flat }; }
+// rough: how hand-made the marks look, 0 (clean vector) … 1 (classic). Scales line wobble, pressure noise,
+// overshoot, unclosed/overrun loops, the off-register colour wash and its uneven edge, and ground-shadow flicks.
+let ROUGH = 1;
+// stroke: 'marker' (even felt-tip line, thin start, light taper) or 'brush' (gongbi 工笔: a pressed entry 起笔,
+// a slight swell through the middle, a long pointed exit 收笔 — written rather than traced)
+let STROKE = 'marker';
+export function setTheme(name = 'classic', o = {}) {
+  const th = THEMES[name];
+  if (!th) throw new Error(`unknown theme ${name} (${Object.keys(THEMES).join(', ')})`);
+  Object.assign(PALETTE, th.palette);
+  Object.assign(TONE_INK, th.tones);
+  THEME = th;
+  ROUGH = o.rough != null && !Number.isNaN(+o.rough) ? clamp(+o.rough, 0, 1.5) : th.rough;
+  STROKE = o.stroke === 'brush' || o.stroke === 'marker' ? o.stroke : th.stroke || 'marker';
+}
+export const themes = Object.keys(THEMES);
+
 /* ------------------------------------------------------------------ the kit */
 
 const WEIGHTS = { outline: 2.3, detail: 1.6, fine: 1.1, hatch: 0.9, bold: 3.2 };
@@ -477,6 +588,7 @@ export function createKit(opts = {}) {
 
   const body = [];
   const defs = [];
+  const fillsUsed = new Set();
   let idn = 0;
   let scope = 'root';
   const counters = { root: 0 };
@@ -512,9 +624,9 @@ export function createKit(opts = {}) {
       const c = pts[0], rr = Math.max(w * 0.75, 1);
       return blobPath(c, rr, r);
     }
-    const wob = o.wobble == null ? 1 : o.wobble;
+    const wob = (o.wobble == null ? 1 : o.wobble) * ROUGH;
     // overshoot both ends
-    const os = o.overshoot == null ? 1 : o.overshoot;
+    const os = (o.overshoot == null ? 1 : o.overshoot) * ROUGH;
     const k0 = Math.min(1, L / 40);
     const e0 = os * (0.5 + r() * 2.2) * k0, e1 = os * (0.8 + r() * 3.2) * k0;
     const a = P[0], a2 = P[Math.min(3, P.length - 1)];
@@ -558,10 +670,24 @@ export function createKit(opts = {}) {
       const nm = [-tg[1], tg[0]];
       const si = s[i];
       const off = A1 * Math.sin((TAU * si) / l1 + f1) + A2 * Math.sin((TAU * si) / l2 + f2) + A3 * Math.sin((TAU * si) / l3 + f3);
-      const pin = 0.45 + 0.55 * smooth(si / (inLen || 1));
-      const swell = 1 + 0.2 * Math.exp(-si / (T * 0.15 + 6));
-      const pout = 1 - 0.62 * smooth((si - (T - outLen)) / (outLen || 1));
-      const noise = 1 + 0.12 * Math.sin((TAU * si) / lw + fw) + 0.06 * Math.sin((TAU * si) / (lw * 0.37) + fw2);
+      let pin, swell, pout;
+      if (STROKE === 'brush' && o.closed) {
+        // a closed outline: no press or taper (they'd leave a blob and a thin gap where the ends meet)
+        pin = 1; pout = 1;
+        swell = 1.12 * (0.62 + 0.78 * Math.abs(Math.sin(Math.atan2(tg[1], tg[0]) - 0.6)));
+      } else if (STROKE === 'brush') {
+        const bOut = Math.min(70, T * 0.5);
+        pin = 0.75 + 0.25 * smooth(si / 3);                                  // the tip lands…
+        swell = 1.08 + 0.75 * Math.exp(-si / 7) + 0.22 * Math.sin(Math.PI * clamp(si / T, 0, 1)); // …presses (起笔), then a belly
+        pout = 1 - 0.95 * smooth((si - (T - bOut)) / (bOut || 1));          // long lift to a fine point (收笔)
+        // the brush is held at an angle: strokes across the tip are thick, strokes along it are thin (兰叶描)
+        swell *= 0.62 + 0.78 * Math.abs(Math.sin(Math.atan2(tg[1], tg[0]) - 0.6));
+      } else {
+        pin = 0.45 + 0.55 * smooth(si / (inLen || 1));
+        swell = 1 + 0.2 * Math.exp(-si / (T * 0.15 + 6));
+        pout = 1 - 0.62 * smooth((si - (T - outLen)) / (outLen || 1));
+      }
+      const noise = 1 + ROUGH * (0.12 * Math.sin((TAU * si) / lw + fw) + 0.06 * Math.sin((TAU * si) / (lw * 0.37) + fw2));
       const hw = (w / 2) * pin * swell * pout * noise * (o.pressure || 1);
       const cx = S[i][0] + nm[0] * off, cy = S[i][1] + nm[1] * off;
       L1.push([cx + nm[0] * hw, cy + nm[1] * hw]);
@@ -593,7 +719,7 @@ export function createKit(opts = {}) {
     const start = Math.floor(r() * n);
     const rot = Q.slice(start).concat(Q.slice(0, start));
     const per = polyLen(Q.concat([Q[0]]));
-    const over = r() < 0.78 ? (3 + r() * 9) * Math.min(1, per / 120) : -(0.5 + r() * 2.5);
+    const over = (r() < 0.78 ? (3 + r() * 9) * Math.min(1, per / 120) : -(0.5 + r() * 2.5)) * ROUGH + (ROUGH < 0.6 ? 1.5 : 0);
     if (over > 0) {
       let acc = 0, i = 0;
       rot.push(rot[0]);
@@ -611,7 +737,7 @@ export function createKit(opts = {}) {
     const r = rng();
     const w = weightOf(o.weight);
     const pts = closed ? openLoop(sheetPts, r) : sheetPts;
-    const d = inkPoly(pts, w, r, { overshoot: closed ? 0.35 : o.overshoot, wobble: o.wobble, stiff: o.stiff, pressure: o.pressure });
+    const d = inkPoly(pts, w, r, { overshoot: closed ? 0.35 : o.overshoot, wobble: o.wobble, stiff: o.stiff, pressure: o.pressure, closed });
     body.push(`<path d="${d}" fill="${inkColor(o.ink)}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}/>`);
   }
 
@@ -629,7 +755,7 @@ export function createKit(opts = {}) {
     const sgn = signedArea(P) > 0 ? 1 : -1;
     const k = Math.min(1, size / 60);
     const reg = o.register == null ? 1 : o.register;
-    const ang = r() * TAU, mag = (1.1 + r() * 0.9) * k * reg;
+    const ang = r() * TAU, mag = (1.1 + r() * 0.9) * k * reg * ROUGH;
     const dx = Math.cos(ang) * mag, dy = Math.sin(ang) * mag;
     const per = polyLen(P.concat([P[0]]));
     const l1 = 60 + r() * 90, f1 = r() * TAU, f2 = r() * TAU;
@@ -641,7 +767,7 @@ export function createKit(opts = {}) {
       const tg = norm([b[0] - a[0], b[1] - a[1]]);
       const nm = [tg[1] * sgn, -tg[0] * sgn]; // inward
       if (i > 0) s += dist(P[i - 1], P[i]);
-      const inset = k * (0.9 + 1.3 * Math.sin((TAU * s) / l1 + f1) + 0.4 * Math.sin((TAU * s) / (l1 * 0.31) + f2)) * (o.inset == null ? 1 : o.inset);
+      const inset = k * (0.4 + 0.5 * ROUGH + ROUGH * (1.3 * Math.sin((TAU * s) / l1 + f1) + 0.4 * Math.sin((TAU * s) / (l1 * 0.31) + f2))) * (o.inset == null ? 1 : o.inset);
       out.push([P[i][0] + nm[0] * inset + dx, P[i][1] + nm[1] * inset + dy]);
     }
     return out;
@@ -753,6 +879,7 @@ export function createKit(opts = {}) {
     if (!shape || !color) return;
     const r = rng();
     const P = washPoly(txAll(shape.pts), r, o);
+    fillsUsed.add(patternFor(color));
     body.push(`<path d="${pathD(P)}" fill="${patternFor(color)}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}/>`);
     return P;
   }
@@ -768,17 +895,21 @@ export function createKit(opts = {}) {
     return [LIGHT[0] * d, LIGHT[1] * d];
   }
   function shade(shape, color, o = {}) {
+    if (THEME.flat) return;                       // flat colour: no shaded side
     shape = shapeOf(shape);
     if (!shape || !color) return;
     const r = rng();
     const base = o.clip || washPoly(txAll(shape.pts), r, { register: 0.5, inset: 0.6 });
     const off = o.offset || shadeOffset(base, o.amount);
     const moved = washPoly(base.map((p) => [p[0] + off[0], p[1] + off[1]]), r, { register: 0.3, inset: -1.2 });
-    const id = (opts.idPrefix || '') + 'c' + ++idn;
-    defs.push(`<clipPath id="${id}"><path d="${pathD(base)}"/></clipPath>`);
+    // id from the geometry, so a part that doesn't move is byte-identical in every frame (frames share it)
+    const bd = pathD(base);
+    const id = (opts.idPrefix || '') + 'c' + (hashStr(bd) >>> 0).toString(36);
+    defs.push(`<clipPath id="${id}"><path d="${bd}"/></clipPath>`);
     body.push(`<path clip-path="url(#${id})" fill-rule="evenodd" d="${pathD(base)}${pathD(moved.slice().reverse())}" fill="${patternFor(o.raw ? color : darker(color, o.depth))}"/>`);
   }
   function hatch(shape, o = {}) {
+    if (THEME.flat) return;
     shape = shapeOf(shape);
     if (!shape) return;
     const r = rng();
@@ -952,7 +1083,7 @@ export function createKit(opts = {}) {
   }
   /** 田字格 practice box: light red frame + dashed centre cross (+ diagonals for 米字格). */
   function tianzige(x, y, s, o = {}) {
-    const c = o.color || '#d99a8c';
+    const c = o.color || THEME.grid;
     inkLine([[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y - 1]], 1.3, c, { wobble: 0.6 });
     const dash = (a, b) => {
       const L = dist(a, b), n = Math.max(3, Math.round(L / 14));
@@ -1013,30 +1144,41 @@ export function createKit(opts = {}) {
    * pinyin may be numbered ('dian4 hua4'). tone colours: 1 red, 2 orange, 3 green, 4 blue, neutral grey.
    */
   function word(o = {}) {
-    if (!o.boil) return steady(() => word({ ...o, boil: true }));
+    if (!o.boil) {
+      // card lettering is type, not drawing: always the plain marker line, even when pictures use the brush
+      const prev = STROKE; STROKE = 'marker';
+      try { return steady(() => word({ ...o, boil: true })); } finally { STROKE = prev; }
+    }
+    const C = THEME.card;
     const size = o.size || 150;
     const chars = [...String(o.hanzi)].filter((c) => !/\s/.test(c));
     const syl = o.pinyin ? pinyinSyllables(o.pinyin, chars.length) : [];
     const perChar = syl.length === chars.length;
     const tones = o.toneColors !== false && perChar ? syl.map((s) => TONE_INK[s.tone]) : null;
-    const hb = hanzi(o.hanzi, { x: o.x, y: o.y, size, align: o.align, inks: tones, ink: o.ink, grid: o.grid == null ? false : o.grid, t: o.t, hold: o.hold, order: o.order, ghost: o.ghost });
     const hv = o.hanviet ? String(o.hanviet).trim().split(/\s+/) : [];
-    const ps = Math.max(18, size * 0.24), hs = Math.max(15, size * 0.15), ms = o.meaningSize || Math.max(20, size * 0.2);
-    let y = o.y + size + ps * 1.25;
+    const ps = Math.max(18, size * (C.pinyinAbove ? 0.3 : 0.24)), hs = Math.max(15, size * (C.pinyinAbove ? 0.18 : 0.15)), ms = o.meaningSize || Math.max(20, size * 0.2);
+    const top = o.y;
+    // pinyin above (sheng) needs room first
+    const hy = C.pinyinAbove && syl.length ? top + ps * 1.45 : top;
+    const hb = hanzi(o.hanzi, { x: o.x, y: hy, size, align: o.align, inks: C.colorHanzi ? tones : null, ink: o.ink, grid: o.grid == null ? false : o.grid, t: o.t, hold: o.hold, order: o.order, ghost: o.ghost });
     const cx = hb.x + hb.w / 2;
-    if (syl.length) {
+    const pinyinRow = (y) => {
       if (perChar) hb.boxes.forEach((b, i) => text(syl[i].text, b.cx, y, { size: ps, align: 'center', ink: tones ? tones[i] : undefined }));
       else text(syl.map((s) => s.text).join(' '), cx, y, { size: ps, align: 'center' });
-      y += ps * 0.3;
+    };
+    let y = hy + size;
+    if (syl.length) {
+      if (C.pinyinAbove) pinyinRow(top + ps * 0.95);
+      else { y += ps * 1.25; pinyinRow(y); y += ps * 0.3; }
     }
     if (hv.length) {
-      y += hs * 1.35;
-      if (hv.length === chars.length) hb.boxes.forEach((b, i) => text(hv[i].toUpperCase(), b.cx, y, { size: hs, align: 'center', tracking: 1.1, ink: 'charcoal' }));
-      else text(hv.join(' ').toUpperCase(), cx, y, { size: hs, align: 'center', tracking: 1.1, ink: 'charcoal' });
+      y += hs * (C.pinyinAbove ? 1.9 : 1.35);
+      if (hv.length === chars.length) hb.boxes.forEach((b, i) => text(hv[i].toUpperCase(), b.cx, y, { size: hs, align: 'center', tracking: 1.1, ink: C.muted }));
+      else text(hv.join(' ').toUpperCase(), cx, y, { size: hs, align: 'center', tracking: 1.1, ink: C.muted });
     }
-    if (o.meaning) { y += ms * 1.9; text(o.meaning, cx, y, { size: ms, align: 'center' }); }
-    if (o.note) { y += ms * 1.55; text(o.note, cx, y, { size: ms * 0.75, align: 'center', ink: 'brick' }); }
-    return { x: hb.x, y: o.y, w: hb.w, h: y - o.y + ms * 0.4, boxes: hb.boxes, bottom: y + ms * 0.4 };
+    if (o.meaning) { y += ms * 1.9; text(o.meaning, cx, y, { size: ms, align: 'center', ink: C.gloss }); }
+    if (o.note) { y += ms * 1.55; text(o.note, cx, y, { size: ms * 0.75, align: 'center', ink: C.note }); }
+    return { x: hb.x, y: top, w: hb.w, h: y - top + ms * 0.4, boxes: hb.boxes, bottom: y + ms * 0.4 };
   }
 
   /* -------------------- groups */
@@ -1068,7 +1210,7 @@ export function createKit(opts = {}) {
 
   const k = {
     W, H, width: W, height: H, cx: W / 2, cy: H / 2, t, seed,
-    palette: PALETTE, weights: WEIGHTS,
+    palette: PALETTE, weights: WEIGHTS, ease: EASE, motion: (t, beats) => motion(t, beats), spring: springCurve,
     soften, darker, lighter,
     geo,
     draw, fill, ink, shade, hatch,
@@ -1152,7 +1294,7 @@ export function createKit(opts = {}) {
       fill(s, o.color || 'shadow', { opacity: o.opacity == null ? 0.9 : o.opacity, inset: 0.3 });
       if (o.lines !== false) {
         const r = shapeRng();
-        const n = o.lines || 3;
+        const n = Math.round((o.lines || 3) * Math.min(1, ROUGH * 1.2));
         for (let i = 0; i < n; i++) {
           const yy = cy + ry * (0.15 + i * 0.32);
           const half = rx * (0.92 - i * 0.22) * (0.9 + r() * 0.15);
@@ -1167,6 +1309,7 @@ export function createKit(opts = {}) {
 
     /** Raw pieces, for combining frames (see svgDocument). */
     parts() { return { defs: defs.slice(), body: body.slice() }; },
+    fillsUsed() { return [...fillsUsed]; },
     /** Finish: the SVG string. size = output pixel width (viewBox stays in sheet units). */
     toSVG(o = {}) {
       return svgDocument([{ defs, body }], { W, H, seed, size: o.size, transparent: o.transparent || opts.transparent, paper: o.paper, grid: o.grid });
@@ -1193,7 +1336,8 @@ export function svgDocument(frames, o) {
   const parts = [];
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${pxH}" viewBox="0 0 ${W} ${H}">`);
   parts.push('<defs>');
-  if (paperOn) {
+  const texture = paperOn && THEME.texture;
+  if (texture) {
     parts.push(`<filter id="mottle" x="0" y="0" width="100%" height="100%" filterUnits="userSpaceOnUse">` +
       `<feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="2" seed="${pseed + 7}"/>` +
       `<feColorMatrix type="matrix" values="0 0 0 0 0.55  0 0 0 0 0.45  0 0 0 0 0.3  1.2 0 0 0 -0.5"/></filter>`);
@@ -1203,19 +1347,56 @@ export function svgDocument(frames, o) {
   parts.push('</defs>');
   if (paperOn) {
     parts.push(`<rect width="${W}" height="${H}" fill="${o.paper ? soften(o.paper) : PALETTE.paper}"/>`);
-    parts.push(`<rect width="${W}" height="${H}" filter="url(#mottle)" opacity="0.16"/>`);
+    if (texture) parts.push(`<rect width="${W}" height="${H}" filter="url(#mottle)" opacity="0.16"/>`);
   }
   if (frames.length === 1) parts.push(...frames[0].body);
   else {
+    // parts that are the same in every frame are written once, in place; only the runs that change are written
+    // per frame (each run is its own set of frame groups), so drawing order is kept and files stay small
     const n = frames.length, dt = 1 / (o.fps || 10), dur = n * dt;
     parts.push(`<style>.hd-f{visibility:hidden;animation:hd-fr ${fmt(dur * 1000)}ms step-end infinite}` +
       `@keyframes hd-fr{0%{visibility:visible}${(100 / n).toFixed(3)}%{visibility:hidden}100%{visibility:hidden}}</style>`);
-    frames.forEach((f, i) => {
-      // frame 0 is also the static fallback (renderers without CSS animation show it)
-      parts.push(`<g class="hd-f" style="animation-delay:${fmt(i * dt * 1000)}ms${i === 0 ? ';visibility:visible' : ''}">`);
-      parts.push(...f.body);
-      parts.push('</g>');
-    });
+    const B = frames.map((f) => f.body);
+    const holds = new Set();
+    const styleAt = parts.length - 1;
+    const frameGroups = (slice) => {
+      // consecutive identical frames (a held pose) become one group that stays visible for all of them
+      let i = 0;
+      while (i < n) {
+        const body = slice(B[i]).join('\n');
+        let k = 1;
+        while (i + k < n && slice(B[i + k]).join('\n') === body) k++;
+        if (k > 1) holds.add(k);
+        // frame 0 is also the static fallback (renderers without CSS animation show it)
+        parts.push(`<g class="hd-f${k > 1 ? ' hd-h' + k : ''}" style="animation-delay:${fmt(i * dt * 1000)}ms${i === 0 ? ';visibility:visible' : ''}">`);
+        parts.push(body);
+        parts.push('</g>');
+        i += k;
+      }
+    };
+    if (B.every((b) => b.length === B[0].length)) {
+      let i = 0;
+      while (i < B[0].length) {
+        const same = (j) => B.every((b) => b[j] === B[0][j]);
+        if (same(i)) { parts.push(B[0][i]); i++; continue; }
+        let j = i;
+        while (j < B[0].length && !same(j)) j++;
+        const a = i, z = j;
+        frameGroups((b) => b.slice(a, z));
+        i = j;
+      }
+    } else {
+      // frames differ in length: share only the common start and end
+      let pre = 0, post = 0;
+      const minLen = Math.min(...B.map((b) => b.length));
+      while (pre < minLen && B.every((b) => b[pre] === B[0][pre])) pre++;
+      while (post < minLen - pre && B.every((b) => b[b.length - 1 - post] === B[0][B[0].length - 1 - post])) post++;
+      parts.push(...B[0].slice(0, pre));
+      frameGroups((b) => b.slice(pre, b.length - post));
+      if (post) parts.push(...B[0].slice(B[0].length - post));
+    }
+    for (const k of holds) parts[styleAt] = parts[styleAt].replace('</style>',
+      `.hd-h${k}{animation-name:hd-fr${k}}@keyframes hd-fr${k}{0%{visibility:visible}${((100 * k) / n).toFixed(3)}%{visibility:hidden}100%{visibility:hidden}}</style>`);
   }
   if (o.grid) parts.push(gridSVG(W, H));
   parts.push('</svg>');
@@ -1368,10 +1549,12 @@ function installPieces(k, I) {
   /** Person, front view, cute proportions. h = total height. */
   k.person = (x, groundY, o = {}) => {
     const h = o.h || 400;
-    const skin = o.skin || 'skin', shirt = o.shirt || 'blue', pants = o.pants || 'navy', hair = o.hair || 'chocolate';
+    const skin = o.skin || 'skin', shirt = o.shirt || 'blue', pants = o.pants || 'navy', hair = o.hair || 'hair';
+    const style = o.hairStyle || (o.bun ? 'bun' : 'short');
     const t = o.t == null ? k.t : o.t;
     // wave: the raised forearm swings left <-> right around the elbow, ±24°, one swing per loop
-    const wave = o.wave ? (24 * Math.sin(TAU * t) * Math.PI) / 180 : null;
+    const wave = o.wave ? ((o.waveAngle != null ? o.waveAngle : 28 * Math.sin(TAU * t)) * Math.PI) / 180 : null;
+    const elbOf = (a) => [25 + 14 * Math.sin(a), -57 - 14 * Math.cos(a)]; // wrist of the waving arm
     return group({ x, y: groundY, scale: h / 100 }, () => scoped('person', () => {
       if (o.shadow !== false) k.shadow(0, 0, 18, 2.6, { lines: 2 });
       // legs
@@ -1382,7 +1565,8 @@ function installPieces(k, I) {
       // arms (behind torso)
       k.tube([[-11, -60], [-15, -48], [-16, -38]], 6, { fill: shirt, weight: 'detail' });
       let rh;
-      if (wave == null) {
+      if (o.rightArm === false) rh = null; // the scene draws its own right arm (from the returned `shoulder`)
+      else if (wave == null) {
         rh = [16, -36];
         k.tube([[11, -60], [15, -48], [16, -38]], 6, { fill: shirt, weight: 'detail' });
       } else {
@@ -1392,25 +1576,428 @@ function installPieces(k, I) {
         k.tube([elb, [elb[0] + L * sx, elb[1] - L * sy]], 6, { fill: shirt, weight: 'detail' });   // forearm
       }
       k.circle(-16, -36, 3.4, { fill: skin, weight: 'fine' });
-      k.circle(rh[0], rh[1], 3.4, { fill: skin, weight: 'fine' });
+      if (rh == null) { /* no right arm */ } else if (wave == null) k.circle(rh[0], rh[1], 3.4, { fill: skin, weight: 'fine' });
+      else {
+        // open hand, five fingers spread, palm to the viewer; turns with the forearm
+        const wr = [elbOf(wave)[0], elbOf(wave)[1]];
+        k.hand(wr[0], wr[1], { size: 7, angle: (wave * 180) / Math.PI, fill: skin });
+        rh = [wr[0] + 8 * Math.sin(wave), wr[1] - 8 * Math.cos(wave)];
+      }
       // torso
       const torso = geo.spline([[-11, -64], [-12.5, -50], [-12, -34, 'c'], [12, -34, 'c'], [12.5, -50], [11, -64]], true);
       draw(torso, { fill: shirt, shade: 0.35 });
       k.line([[-4, -64], [0, -60], [4, -64]], { weight: 'fine' });
+      // hair behind the head (bob, two buns)
+      if (style === 'bob') draw(geo.spline([[-13.6, -66, 'c'], [-14.2, -80], [-9, -90], [9, -90], [14.2, -80], [13.6, -66, 'c']], true), { fill: hair, weight: 'detail' });
+      if (style === 'buns') { k.circle(-8, -92.5, 3.8, { fill: hair, weight: 'detail' }); k.circle(8, -92.5, 3.8, { fill: hair, weight: 'detail' }); }
       // head
       k.rect(-2.4, -68, 4.8, 5, { fill: skin, ink: false });
-      draw(geo.blob(0, -78, 11.5, { squash: 1.02, irregular: 0.02 }), { fill: skin, shade: 0.25 });
+      draw(geo.blob(0, -78, 11.5, { squash: 1.02, irregular: 0.02 }), { fill: skin, shade: o.faceShade == null ? 0.1 : o.faceShade }); // light: a heavy half-face shadow reads as a mask
       // hair cap
       const hairS = geo.spline([[-12, -76, 'c'], [-11.5, -86], [-4, -91], [6, -90], [11.5, -85], [12.2, -76, 'c'], [8, -81], [0, -82.5], [-6, -80]], true);
-      draw(hairS, { fill: hair, weight: 'detail' });
-      if (o.bun) k.circle(0, -92, 4.5, { fill: hair, weight: 'detail' });
-      k.dot(-4, -76.5, 1.15); k.dot(4, -76.5, 1.15);
+      // short: side-swept cap. bangs / bob / buns: straight fringe across the forehead (齐刘海)
+      const bangs = geo.spline([[-12.4, -74, 'c'], [-12, -86], [-4, -91.2], [5, -90.6], [12, -86], [12.4, -74, 'c'], [10.6, -80.6, 'c'], [-10.6, -80.6, 'c']], true);
+      draw(style === 'short' || style === 'bun' ? hairS : bangs, { fill: hair, weight: 'detail' });
+      if (style === 'bun') k.circle(0, -92, 4.5, { fill: hair, weight: 'detail' });
+      if (o.eyes === 'closed') { k.arc(-4, -77, 2, 1.1, 15, 165, { weight: 'detail' }); k.arc(4, -77, 2, 1.1, 15, 165, { weight: 'detail' }); }
+      else { k.dot(-4, -76.5, 1.05); k.dot(4, -76.5, 1.05); }
       k.arc(0, -72.5, 3, 1.6, 20, 160, { weight: 'fine' });
-      k.ellipse(-7, -73, 2.3, 1.3, { fill: 'blush', ink: false });
-      k.ellipse(7, -73, 2.3, 1.3, { fill: 'blush', ink: false });
-      return { head: k.toSheet(0, -78), top: k.toSheet(0, -91), hand: k.toSheet(...rh), feet: k.toSheet(0, 0) };
+      k.ellipse(-7, -73, 2, 1.1, { fill: 'blush', ink: false });
+      k.ellipse(7, -73, 2, 1.1, { fill: 'blush', ink: false });
+      return { head: k.toSheet(0, -78), top: k.toSheet(0, -91), hand: rh ? k.toSheet(...rh) : null, feet: k.toSheet(0, 0),
+               shoulder: k.toSheet(11, -61), mouth: k.toSheet(0, -72.5), unit: h / 100 };
     }));
   };
+
+  /**
+   * Hand with five fingers, palm towards the viewer. (x, y) = wrist; angle in degrees (0 = fingers up, + = clockwise);
+   * size = palm width. side: 'right' (thumb on the viewer's left, a right hand facing you) or 'left'.
+   * spread: 0 (fingers together) … 1 (wide open, default 0.7). curl: 0 (straight) … 1 (fist-ish).
+   */
+  k.hand = (x, y, o = {}) => {
+    const w = o.size || 40, ph = w * 1.0, fill = o.fill || 'skin';
+    const m = o.side === 'left' ? -1 : 1, spread = o.spread == null ? 0.7 : o.spread, curl = o.curl || 0;
+    return group({ x, y, rotate: o.angle || 0, sx: m, sy: 1, scale: 1 }, () => scoped('hand', () => {
+      const fw = w * 0.24;
+      // fingers (behind the palm): index → pinky, fanned out from the top of the palm
+      const fingers = [[-0.34, 0.74, -1], [-0.115, 0.84, -0.35], [0.115, 0.78, 0.35], [0.33, 0.6, 1]];
+      for (const [fx, len, dir] of fingers) {
+        const a = (dir * 11 * spread * Math.PI) / 180, L = len * ph * (1 - curl * 0.55);
+        const b = [fx * w, -ph * 0.78];
+        const tip = [b[0] + Math.sin(a) * L, b[1] - Math.cos(a) * L];
+        const mid = [(b[0] + tip[0]) / 2 + curl * fw * 0.6, (b[1] + tip[1]) / 2];
+        k.tube([b, mid, tip], [fw, fw * 0.88], { fill, weight: o.weight || 'fine' });
+      }
+      // thumb, out to the side and up
+      const ta = ((-30 - 22 * spread) * Math.PI) / 180;
+      const tb = [-w * 0.32, -ph * 0.22], tl = ph * 0.62;
+      k.tube([tb, [tb[0] + Math.sin(ta) * tl * 0.55, tb[1] - Math.cos(ta) * tl * 0.5], [tb[0] + Math.sin(ta) * tl, tb[1] - Math.cos(ta) * tl * 0.95]], [fw * 1.1, fw * 0.95], { fill, weight: o.weight || 'fine' });
+      // palm
+      draw(geo.spline([[-w * 0.27, 0, 'c'], [-w * 0.47, -ph * 0.36], [-w * 0.5, -ph * 0.8], [0, -ph * 0.93], [w * 0.5, -ph * 0.8], [w * 0.45, -ph * 0.36], [w * 0.27, 0, 'c']], true), { fill, weight: 'fine', shade: 0.12 });
+      // palm crease
+      k.arc(w * 0.04, -ph * 0.4, w * 0.22, ph * 0.16, 205, 315, { weight: 'fine' });
+      return { wrist: k.toSheet(0, 0), center: k.toSheet(0, -ph * 0.5), tip: k.toSheet(-0.11 * w, -ph * 1.5) };
+    }));
+  };
+
+  /**
+   * A hand holding something upright (a glass, a cup, a phone, a handle), seen from the front: the back of the hand on
+   * one side of the object, four fingers wrapped across its front, thumb hidden behind (`thumb: true` shows its tip).
+   * (x, y) = where the hand meets the object's edge, at mid-grip. size = grip height (4 fingers). across = how far the
+   * fingers reach over the front (≈ the object's width). side: 'right' = the hand comes from the right (a person's
+   * right hand in a front view), 'left' mirrors it. angle = the object's tilt in degrees (the grip turns with it).
+   * Draw it AFTER the object. Returns { wrist } (where the forearm joins).
+   */
+  k.grip = (x, y, o = {}) => {
+    const s = o.size || 60, across = o.across == null ? s * 1.1 : o.across, fill = o.fill || 'skin';
+    const m = o.side === 'left' ? -1 : 1;
+    return group({ x, y, rotate: o.angle || 0 }, () => group({ sx: m, sy: 1 }, () => scoped('grip', () => {
+      const fw = s * 0.27;
+      // back of the hand, just outside the object's edge
+      draw(geo.spline([[s * 0.05, -s * 0.5], [s * 0.42, -s * 0.46], [s * 0.62, -s * 0.1], [s * 0.6, s * 0.3], [s * 0.36, s * 0.52], [s * 0.04, s * 0.48]], true), { fill, weight: o.weight || 'fine', shade: 0.18 });
+      if (o.thumb) k.tube([[s * 0.2, -s * 0.42], [-s * 0.05, -s * 0.6], [-s * 0.28, -s * 0.66]], [fw * 1.05, fw * 0.9], { fill, weight: o.weight || 'fine' });
+      // fingers across the front, index on top; each a little shorter going down
+      [[-0.36, 1], [-0.12, 0.97], [0.12, 0.9], [0.35, 0.74]].forEach(([fy, len]) => {
+        const y0 = fy * s, x1 = s * 0.18 - (across * 0.78 + s * 0.15) * len;
+        k.tube([[s * 0.22, y0], [(s * 0.22 + x1) / 2, y0 + s * 0.02], [x1, y0 - s * 0.01]], [fw, fw * 0.92], { fill, weight: o.weight || 'fine' });
+      });
+      return { wrist: k.toSheet(s * 0.55, s * 0.1) };
+    })));
+  };
+
+  /**
+   * Liquid in a container that tips: the surface stays level in the world and the amount stays the same.
+   * poly = the container's inside in its own coordinates (y down, opening at the top); tilt = the container's rotation
+   * in degrees (the same angle you draw it with); fill = 0…1 of the container's area. Returns the liquid polygon (same
+   * local coordinates, draw it inside the container's group) and its surface line, or null if empty.
+   */
+  k.liquid = (poly, o = {}) => {
+    const tr = ((o.tilt || 0) * Math.PI) / 180, fillF = clamp(o.fill == null ? 0.6 : o.fill, 0, 1);
+    const n = [Math.sin(tr), Math.cos(tr)];                          // world "down", in local coordinates
+    const area = (P) => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return Math.abs(a) / 2; };
+    const cut = (d) => {                                              // keep the part below the level p·n = d
+      const out = [];
+      poly.forEach((p, i) => {
+        const q = poly[(i + 1) % poly.length], a = p[0] * n[0] + p[1] * n[1] - d, b = q[0] * n[0] + q[1] * n[1] - d;
+        if (a >= 0) out.push(p);
+        if ((a >= 0) !== (b >= 0)) { const f = a / (a - b); out.push([p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f]); }
+      });
+      return out;
+    };
+    const target = area(poly) * fillF;
+    const ds = poly.map((p) => p[0] * n[0] + p[1] * n[1]);
+    let lo = Math.min(...ds), hi = Math.max(...ds);
+    for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; if (area(cut(mid)) > target) lo = mid; else hi = mid; }
+    const P = cut((lo + hi) / 2);
+    if (P.length < 3) return null;
+    // the surface: the two cut points (on the level line)
+    const d = (lo + hi) / 2, onLine = P.filter((p) => Math.abs(p[0] * n[0] + p[1] * n[1] - d) < 1e-6);
+    return { poly: P, surface: onLine.length >= 2 ? [onLine[0], onLine[onLine.length - 1]] : null };
+  };
+
+  /* ---- chibi person ----
+   * Big head, bean body, short tapered limbs: reads at flashcard size and suits 简笔画. Local units: 100 = height.
+   *   head: head height as a share of the whole (0.33 … 0.5, default 0.4)
+   *   expression: 'neutral' | 'happy' | 'closed' | 'tired' | 'surprised' | 'sad' | 'angry' | 'scared'
+   *   hairStyle: 'short' (side fringe + tuft) | 'bangs' | 'bob' | 'buns';  hair, skin, shirt, pants, shoes colours
+   *   wave: degrees → right arm raised, forearm swinging by that angle, open five-finger hand
+   *   reach: { right: [x, y], left: [x, y] } (sheet coords) → that arm bends to put its wrist there (draw the held
+   *          thing and k.grip on top). Without wave/reach an arm hangs with a round mitten hand.
+   * k.chibiLayout(x, groundY, o) gives the same anchors without drawing (to place things before drawing).
+   */
+  const chibiGeom = (o) => {
+    const head = clamp(o.head || 0.45, 0.28, 0.55), headH = head * 100, rH = headH / 2;   // 0.4–0.5 = 二头半身 … 二头身
+    const hy = -(100 - rH), body = 100 - headH, legH = body * 0.4, tB = -legH, tT = -(100 - headH) - 4;
+    const sw = rH * 0.5, hw = rH * 0.66, armW = rH * 0.34, armL = (tB - tT) * 0.9;
+    const shoulder = (side) => [side * hw * 0.86, tT + (tB - tT) * 0.2];   // at the edge of the body, like a real shoulder
+    return { head, rH, hy, legH, tB, tT, sw, hw, armW, armL, shoulder,
+      mouth: [0, hy + rH * 0.56], eyes: [[-rH * 0.4, hy + rH * 0.2], [rH * 0.4, hy + rH * 0.2]] };   // Q版: features sit in the lower half of the face
+  };
+  k.chibiLayout = (x, groundY, o = {}) => {
+    const G = chibiGeom(o), s = (o.h || 400) / 100, S = (p) => [x + p[0] * s, groundY + p[1] * s];
+    return { unit: s, head: S([0, G.hy]), top: S([0, G.hy - G.rH]), mouth: S(G.mouth), shoulderR: S(G.shoulder(1)),
+      shoulderL: S(G.shoulder(-1)), armLength: G.armL * s, armWidth: G.armW * s, feet: [x, groundY] };
+  };
+  k.chibi = (x, groundY, o = {}) => {
+    const G = chibiGeom(o), h = o.h || 400, s = h / 100;
+    const skin = o.skin || 'skin', shirt = o.shirt || 'sky', pants = o.pants || 'navy', hair = o.hair || 'hair', shoes = o.shoes || 'charcoal';
+    const style = o.hairStyle || 'short', expr = o.expression || 'neutral';
+    const rich = o.detail === 'rich';   // restrained Q版 with more detail: brows, eye shine, nose, ears, collar points, cuffs, thumbs, hair strands
+    const { rH, hy, tB, tT, hw, armW, armL } = G;
+    const toLocal = (p) => [(p[0] - x) / s, (p[1] - groundY) / s];
+    const out = {};
+    const OW = o.weight || 'bold';                  // Q版: a thick, even outline (inner marks stay 'detail')
+    const prevStroke = STROKE; STROKE = 'marker';   // people always get the even line, even when objects use the brush
+    try { return chibiDraw(); } finally { STROKE = prevStroke; }
+    function chibiDraw() { return group({ x, y: groundY, scale: s }, () => scoped('chibi', () => {
+      if (o.shadow !== false) k.shadow(0, 0, hw * 1.3, 3.2, { lines: 2 });
+      // legs + shoes
+      for (const sd of [-1, 1]) {
+        k.tube([[sd * hw * 0.4, tB - 3], [sd * hw * 0.44, -4]], [hw * 0.56, hw * 0.5], { fill: pants, weight: OW, cap: 'flat' });
+        k.ellipse(sd * hw * 0.5, -2.8, hw * 0.42, 3.3, { fill: shoes, weight: OW });
+        if (rich) k.line(sd * hw * 0.5 - hw * 0.36, -1.4, sd * hw * 0.5 + hw * 0.36, -1.4, { weight: 'fine' });   // sole
+      }
+      // arms: hanging ones go behind the body, raised / reaching ones in front
+      const mitten = (p, sd) => {
+        if (rich) k.ellipse(p[0] - sd * armW * 0.5, p[1] - armW * 0.2, armW * 0.28, armW * 0.36, { fill: skin, weight: OW });   // thumb, toward the body
+        k.circle(p[0], p[1], armW * 0.62, { fill: skin, weight: OW });
+      };
+      const hang = (sd) => {
+        const S = G.shoulder(sd), E = [S[0] + sd * armW * 0.55, S[1] + armL * 0.5], W = [S[0] + sd * armW * 0.75, S[1] + armL * 0.92];
+        k.tube([S, E, W], [armW, armW * 0.86], { fill: shirt, weight: OW });
+        if (rich) k.line(W[0] - armW * 0.46, W[1] - armW * 0.25, W[0] + armW * 0.46, W[1] - armW * 0.2, { weight: 'detail' });   // cuff
+        mitten([W[0], W[1] + armW * 0.35], sd);
+        out[sd > 0 ? 'handR' : 'handL'] = k.toSheet(W[0], W[1] + armW * 0.35);
+      };
+      // two-bone arm with skeleton rules: fixed bone lengths; the elbow can't fold shut (≥ ~40° open); and when the
+      // hand's direction is known (`rightElbowDir` / `leftElbowDir`: from the wrist toward the elbow, i.e. the way the
+      // back of the hand points), the forearm must continue it, so the wrist only bends a little. That picks the elbow:
+      // tip a glass up to drink and the elbow rises, as it does for real.
+      const ik = (sd, Tsheet, dirSheet) => {
+        const S = G.shoulder(sd), T = toLocal(Tsheet), a = armL * 0.52, b = armL * 0.5;
+        let dx = T[0] - S[0], dy = T[1] - S[1], d = Math.hypot(dx, dy);
+        const minReach = Math.sqrt(a * a + b * b - 2 * a * b * Math.cos((40 * Math.PI) / 180));   // elbow ≥ 40° open
+        const dd = clamp(d, minReach, a + b - 0.3);
+        const base = Math.atan2(dy, dx), al = Math.acos(clamp((a * a + dd * dd - b * b) / (2 * a * dd), -1, 1));
+        const cand = [base + al, base - al].map((t) => [S[0] + Math.cos(t) * a, S[1] + Math.sin(t) * a]);
+        // the elbow can't be inside the body: it must sit outside the torso's edge at its height
+        const inside = (p) => p[1] > tT && p[1] < tB + 2 && Math.abs(p[0]) < hw * 0.8;   // an arm at the side may overlap the body's edge, not sink into it
+        let E;
+        if (dirSheet) {
+          const dl = Math.hypot(dirSheet[0], dirSheet[1]) || 1, u = [dirSheet[0] / dl, dirSheet[1] / dl];   // scale-free: same direction locally
+          const score = (p) => { const v = [p[0] - T[0], p[1] - T[1]], vl = Math.hypot(v[0], v[1]) || 1; return (v[0] * u[0] + v[1] * u[1]) / vl; };
+          E = cand.sort((p, q) => score(q) - score(p))[0];   // the forearm that best continues the hand
+        } else E = cand.sort((p, q) => (q[1] + q[0] * sd * 0.35) - (p[1] + p[0] * sd * 0.35))[0];  // relaxed: elbow down and a little out
+        if (inside(E)) {
+          const other = cand.find((p) => p !== E);
+          if (other && !inside(other)) E = other;
+          else E = [sd * hw * 0.85, E[1]];   // last resort: keep the elbow at the body's edge (the forearm takes the slack)
+        }
+        // relaxed hold (no direction, or the hand's back faces down): the upper arm hangs by the side and the forearm
+        // points toward the viewer, so it looks shorter (foreshortened). A real arm holding something at the chest.
+        const relaxed = !dirSheet || dirSheet[1] / (Math.hypot(dirSheet[0], dirSheet[1]) || 1) > 0.75;
+        const Eh = [S[0] + sd * armW * 0.25, S[1] + a * 0.96];
+        if (relaxed && Math.hypot(T[0] - Eh[0], T[1] - Eh[1]) <= b * 1.02) E = Eh;
+        const W = [S[0] + (dx / d) * Math.min(d, a + b - 0.3), S[1] + (dy / d) * Math.min(d, a + b - 0.3)];
+        const Wr = d > a + b - 0.3 && E !== Eh ? W : T;
+        k.tube([S, E, Wr], [armW, armW * 0.84], { fill: shirt, weight: OW });
+        k.arc(E[0], E[1], armW * 0.32, armW * 0.18, 200, 340, { weight: 'fine' });            // a fold at the elbow
+        out[sd > 0 ? 'wristR' : 'wristL'] = k.toSheet(...Wr);
+      };
+      const front = [];
+      for (const sd of [1, -1]) {
+        const key = sd > 0 ? 'right' : 'left';
+        if (sd > 0 && o.wave != null) front.push(() => {
+          const S = G.shoulder(1), E = [S[0] + rH * 0.95, S[1] - armL * 0.05], sw = (o.wave * Math.PI) / 180;  // elbow out past the hair
+          const W = [E[0] + Math.sin(sw) * armL * 0.55, E[1] - Math.cos(sw) * armL * 0.55];
+          k.tube([S, E, W], [armW, armW * 0.86], { fill: shirt, weight: OW });
+          k.hand(W[0], W[1], { size: armW * 1.25, angle: o.wave, fill: skin, weight: 'outline' });
+          out.handR = k.toSheet(...W);
+        });
+        else if (o.reach && o.reach[key]) front.push(() => ik(sd, o.reach[key], o.reach[key + 'ElbowDir']));
+        else hang(sd);
+      }
+      // body: a bean, wider at the hips; a round collar under the chin
+      draw(geo.spline([[-G.sw, tT + 2], [-hw * 1.04, tT + (tB - tT) * 0.6], [-hw * 0.9, tB + 0.5], [0, tB + 1.5], [hw * 0.9, tB + 0.5], [hw * 1.04, tT + (tB - tT) * 0.6], [G.sw, tT + 2], [0, tT - 1.5]], true), { fill: shirt, shade: 0.25, weight: OW });
+      if (rich) for (const sd of [-1, 1]) k.poly([[sd * rH * 0.04, tT + 0.5], [sd * rH * 0.36, tT + 0.2], [sd * rH * 0.24, tT + rH * 0.3]], { fill: o.collar || (PALETTE.paperwhite ? 'paperwhite' : 'white'), weight: 'detail' });   // shirt collar points
+      else k.arc(0, tT + 1.5, rH * 0.26, rH * 0.1, 15, 165, { weight: 'detail' });                    // collar (under the chin)
+      // Q版 hair: a big rounded mass that's wider and taller than the head, so it owns the silhouette
+      const P = (pts) => pts.map(([a, b, c]) => [a * rH, hy + b * rH, c]);
+      const backLen = style === 'bob' ? 0.78 : style === 'short' ? 0.05 : 0.3;
+      draw(geo.spline(P([[-1.16, backLen, 'c'], [-1.24, -0.35], [-0.86, -1.08], [0, -1.26], [0.86, -1.08], [1.24, -0.35], [1.16, backLen, 'c']]), true), { fill: hair, weight: OW });
+      if (style === 'buns') for (const sd of [-1, 1]) k.circle(sd * rH * 0.74, hy - rH * 1.02, rH * 0.34, { fill: hair, weight: OW });
+      if (style !== 'bob') for (const sd of [-1, 1]) { k.ellipse(sd * rH * 1.04, hy + rH * 0.2, rH * 0.15, rH * 0.2, { fill: skin, weight: OW }); if (rich) k.arc(sd * rH * 1.04, hy + rH * 0.2, rH * 0.07, rH * 0.1, sd > 0 ? 100 : -80, sd > 0 ? 260 : 80, { weight: 'fine' }); }
+      k.ellipse(0, hy + rH * 0.04, rH * 1.04, rH * 0.98, { fill: skin, shade: 0.08, weight: OW });
+      // fringe: chunky rounded clumps over the forehead (side-swept for 'short', straight for the others)
+      const fringe = style === 'short'
+        ? P([[-1.17, 0.0, 'c'], [-1.2, -0.5], [-0.8, -1.06], [0, -1.24], [0.8, -1.06], [1.2, -0.5], [1.17, 0.0, 'c'], [0.98, -0.3], [0.7, -0.36, 'c'], [0.5, -0.12], [0.22, -0.36, 'c'], [-0.1, -0.2], [-0.42, -0.4, 'c'], [-0.74, -0.24], [-1.0, -0.36]])
+        : P([[-1.17, 0.05, 'c'], [-1.2, -0.5], [-0.8, -1.06], [0, -1.24], [0.8, -1.06], [1.2, -0.5], [1.17, 0.05, 'c'], [0.96, -0.2], [0.66, -0.3, 'c'], [0.33, -0.2], [0, -0.3, 'c'], [-0.33, -0.2], [-0.66, -0.3, 'c'], [-0.96, -0.2]]);
+      draw(geo.spline(fringe, true), { fill: hair, weight: OW });
+      if (style === 'short') draw(geo.spline(P([[-0.14, -1.18], [-0.04, -1.42], [0.26, -1.36], [0.1, -1.16]]), true), { fill: hair, weight: OW });  // tuft
+      if (rich) for (const [a0, b0, a1, b1] of [[-0.55, -0.98, -0.32, -0.62], [0.05, -1.12, 0.12, -0.7], [0.55, -0.95, 0.42, -0.6]])
+        k.spline(P([[a0, b0], [(a0 + a1) / 2 + 0.06, (b0 + b1) / 2], [a1, b1]]), { weight: 'fine' });   // a few hair strands
+      // one flat highlight on the hair (top-left)
+      draw(geo.spline(P([[-0.78, -0.72], [-0.5, -0.98], [-0.18, -1.08], [-0.26, -0.98], [-0.56, -0.86], [-0.72, -0.66]]), true), { fill: o.hairShine || 'grey', ink: false });
+      // face
+      const [eL, eR] = G.eyes, er = rH * 0.11;
+      const brow = (dy, tilt) => { for (const [ex, ey] of [eL, eR]) { const sd = Math.sign(ex); k.line(ex - er * 1.1, ey - er * 2.3 + dy - sd * tilt, ex + er * 1.1, ey - er * 2.3 + dy + sd * tilt, { weight: 'fine' }); } };
+      if (expr === 'closed' || expr === 'happy') for (const [ex, ey] of [eL, eR]) k.arc(ex, ey + (expr === 'happy' ? er * 0.4 : 0), er * 1.1, er * 0.75, expr === 'happy' ? 200 : 20, expr === 'happy' ? 340 : 160, { weight: 'detail' });
+      else if (expr === 'tired') for (const [ex, ey] of [eL, eR]) { k.ellipse(ex, ey + er * 0.35, er * 0.9, er * 0.6, { fill: 'ink', ink: false }); k.line(ex - er * 1.2, ey - er * 0.1, ex + er * 1.2, ey - er * 0.1, { weight: 'detail' }); }
+      else for (const [ex, ey] of [eL, eR]) {
+        const big = expr === 'surprised' || expr === 'scared' ? 1.15 : 1;
+        k.ellipse(ex, ey, er * 0.8 * big, er * 1.0 * big, { fill: 'ink', ink: false });       // Q版: solid dot eyes
+        if (o.eyeShine ?? rich) k.circle(ex - er * 0.28, ey - er * 0.36, er * 0.28, { fill: 'white', ink: false });
+      }
+      if (expr === 'sad' || expr === 'scared') brow(-er * (expr === 'scared' ? 0.5 : 0), er * 0.5); else if (expr === 'surprised') brow(-er * 0.6, 0); else if (expr === 'tired') brow(er * 0.3, -er * 0.2); else if (expr === 'angry') brow(er * 0.35, -er * 0.75);
+      else if (rich) for (const [ex, ey] of [eL, eR]) k.arc(ex, ey - er * 1.9, er * 1.15, er * 0.5, 200, 340, { weight: 'detail' });   // soft brows
+      if (rich) k.arc(0, hy + rH * 0.36, rH * 0.05, rH * 0.04, 0, 160, { weight: 'fine' });          // a hint of a nose
+      const [mx, my] = G.mouth;
+      if (expr === 'happy') draw(geo.spline([[mx - rH * 0.16, my - rH * 0.04, 'c'], [mx + rH * 0.16, my - rH * 0.04, 'c'], [mx + rH * 0.12, my + rH * 0.08], [mx, my + rH * 0.14], [mx - rH * 0.12, my + rH * 0.08]], true), { fill: 'blush', weight: 'detail' });  // D-shaped open smile
+      else if (expr === 'surprised') k.ellipse(mx, my + rH * 0.03, rH * 0.07, rH * 0.09, { fill: 'blush', weight: 'detail' });
+      else if (expr === 'angry') k.arc(mx, my + rH * 0.1, rH * 0.13, rH * 0.07, 200, 340, { weight: 'detail' });
+      else if (expr === 'scared') k.line([[mx - rH * 0.15, my + rH * 0.04], [mx - rH * 0.075, my - rH * 0.01], [mx, my + rH * 0.04], [mx + rH * 0.075, my - rH * 0.01], [mx + rH * 0.15, my + rH * 0.04]], { weight: 'detail' });
+      else if (expr === 'sad') k.arc(mx, my + rH * 0.08, rH * 0.12, rH * 0.07, 200, 340, { weight: 'detail' });
+      else if (expr === 'tired') k.line(mx - rH * 0.1, my + rH * 0.02, mx + rH * 0.1, my + rH * 0.02, { weight: 'detail' });
+      else if (o.mouth !== false) k.arc(mx, my - rH * 0.02, rH * 0.12, rH * 0.08, 20, 160, { weight: 'detail' });
+      for (const sd of [-1, 1]) k.ellipse(sd * rH * 0.62, hy + rH * 0.46, rH * 0.17, rH * 0.11, { fill: 'blush', ink: false });   // round pink blush
+      if (o.glasses) for (const [ex, ey] of [eL, eR]) k.circle(ex, ey, er * 2.1, { weight: 'detail' });
+      if (o.glasses) k.arc(0, eL[1] - er * 0.3, rH * 0.1, rH * 0.06, 200, 340, { weight: 'detail' });
+      // arms in front of the body
+      for (const f of front) f();
+      Object.assign(out, { head: k.toSheet(0, hy), top: k.toSheet(0, hy - rH), mouth: k.toSheet(...G.mouth), unit: s,
+        shoulderR: k.toSheet(...G.shoulder(1)), shoulderL: k.toSheet(...G.shoulder(-1)), feet: k.toSheet(0, 0) });
+      return out;
+    })); }
+  };
+
+  /* ---- paper stop-motion physics. Parts are RIGID flat cut-outs: they slide, fall, tilt and rock, never stretch. ---- */
+  const WEIGHT = { heavy: { bounce: 0.05, e: 0.12, rock: 0.5 }, normal: { bounce: 0.3, e: 0.3, rock: 1 }, light: { bounce: 0.5, e: 0.5, rock: 1.4 } };
+  const weightOf = (o) => WEIGHT[o.weight] || WEIGHT.normal;
+  // group options that rotate by deg about (cx, cy), then move by (dx, dy)
+  const about = (cx, cy, deg, dx = 0, dy = 0) => {
+    const a = (deg * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+    return { x: cx - (ca * cx - sa * cy) + dx, y: cy - (sa * cx + ca * cy) + dy, rotate: deg };
+  };
+
+  /**
+   * Paper stop-motion reveal (the 'assemble' animation): the part drawn by fn is absent before `at`, then comes in as
+   * a rigid paper cut-out and holds. t, at, dur are shares of the loop (0…1). Leave the end of the loop as a hold.
+   *   k.pop(t, 0.30, () => k.ricebowl(…), { from: 'right', tilt: 8 })   // slides in, lands tilted, settles flat
+   *   k.pop(t, 0.16, () => k.line(…tick…), { pivot: [cx, cy] })          // a mark stamped on: grows from the pivot
+   * opts: from 'left'|'right'|'top'|'bottom' (the default), distance, tilt (degrees it arrives turned, settles to 0,
+   * about `pivot` or the sheet centre), weight 'heavy'|'normal'|'light' (how much it overshoots), ease (overrides
+   * weight), dur 0.12. `pivot` WITHOUT `from` scales the part up from that point: only for ink marks (ticks, stamps,
+   * sparkles), never for objects, since paper can't grow.
+   */
+  k.pop = (t, at, fn, o = {}) => {
+    const dur = o.dur || 0.12, p = (t - at) / dur;
+    if (p <= 0) return null;
+    if (p >= 1) return fn();
+    const W8 = weightOf(o), e = (EASE[o.ease] || springCurve(W8.bounce))(p);
+    if (o.pivot && !o.from) {
+      const [px, py] = o.pivot, sc = Math.max(0.001, e);
+      return group({ x: px * (1 - sc), y: py * (1 - sc), scale: sc }, fn);
+    }
+    const from = o.from || 'bottom', d = (1 - e) * (o.distance || k.W * 0.6);
+    const dir = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }[from] || [0, 1];
+    const [px, py] = o.pivot || [k.W / 2, k.H / 2];
+    return group(about(px, py, (o.tilt || 0) * (1 - e), dir[0] * d, dir[1] * d), fn);
+  };
+
+  /**
+   * Drop a rigid part onto the ground under gravity: it falls (speeding up), hits groundY, bounces a few times (each
+   * lower: restitution by weight) and, if it came in tilted, rocks on its contact point until it lies flat.
+   * Its shadow stays on the ground and darkens and grows as it comes down: give `shadow: [rx, ry]` and draw the
+   * part itself with its own shadow off (shadow: false).
+   *   k.drop(t, 0.2, () => k.chibi(500, 985, { …, shadow: false }), { x: 500, groundY: 985, shadow: [90, 10] })
+   * opts: x, groundY (the contact point, default sheet centre / bottom), height (fall, default 0.45·H), weight
+   * 'heavy'|'normal'|'light', tilt (degrees while falling), dur 0.16.
+   */
+  k.drop = (t, at, fn, o = {}) => {
+    const dur = o.dur || 0.16, p = (t - at) / dur;
+    const x = o.x == null ? k.W / 2 : o.x, gy = o.groundY == null ? k.H * 0.9 : o.groundY;
+    const W8 = weightOf(o), h = o.height || k.H * 0.45;
+    const sh = (s) => { if (o.shadow) k.shadow(x, gy, o.shadow[0] * (0.35 + 0.65 * s), o.shadow[1] * (0.35 + 0.65 * s), { opacity: 0.9 * (0.25 + 0.75 * s), lines: s > 0.98 ? 2 : false }); };
+    if (p <= 0) return null;
+    if (p >= 1) { sh(1); return fn(); }
+    // normalised ballistics: h = 1, g = 2, so the fall takes 1 and a bounce launched at speed v lasts v and rises v²/4
+    const vs = []; for (let v = 2 * W8.e; v * v / 4 > 0.003; v *= W8.e) vs.push(v);
+    const T = 1 + vs.reduce((a, v) => a + v, 0) + 0.25;           // + a short rest at the end
+    let tau = p * T, y;
+    if (tau < 1) y = 1 - tau * tau;
+    else {
+      let r = tau - 1; y = 0;
+      for (const v of vs) { if (r < v) { y = (v * r - r * r) / 1; break; } r -= v; }
+    }
+    // rocking: hold the tilt while falling, then a damped rock about the contact point that ends flat
+    let ang = o.tilt || 0;
+    if (tau >= 1) { const s = (tau - 1) / (T - 1); ang = (o.tilt || 0) * W8.rock * Math.exp(-3 * s) * Math.cos(Math.PI * 3 * s) * (1 - s); }
+    sh(1 - y);
+    return group(about(x, gy, ang, 0, -y * h), fn);
+  };
+
+  /**
+   * A part hit by something (the contact beat): it is drawn as usual, and from `at` it jolts (pushed by `push`
+   * [dx, dy]) and rocks about `pivot` (where it stands), damped back to rest over `dur`.
+   *   k.react(t, 0.62, () => k.meter(…), { pivot: [700, 900], amount: 6, push: [12, 0] })
+   * opts: pivot (default sheet centre), amount (degrees, 6), push [dx, dy], dur 0.12, weight (heavy jolts less).
+   */
+  k.react = (t, at, fn, o = {}) => {
+    const dur = o.dur || 0.12, s = (t - at) / dur;
+    if (s <= 0 || s >= 1) return fn();
+    const W8 = weightOf(o), amp = Math.exp(-3.5 * s) * (1 - s) * W8.rock;
+    const [px, py] = o.pivot || [k.W / 2, k.H / 2], push = o.push || [0, 0];
+    const kick = Math.sin(Math.PI * Math.min(1, s * 3)) * amp;   // pushed out fast, then back
+    return group(about(px, py, (o.amount == null ? 6 : o.amount) * amp * Math.sin(2 * Math.PI * 2 * s), push[0] * kick, push[1] * kick), fn);
+  };
+
+  /** One small flat highlight (light, no outline): the lit spot on a round or glossy thing. Light comes from the top-left. */
+  k.highlight = (x, y, rx, ry = rx * 0.55, o = {}) => k.group({ x, y, rotate: o.angle == null ? -35 : o.angle }, () =>
+    k.ellipse(0, 0, rx, ry, { fill: o.fill || (PALETTE.paperwhite ? 'paperwhite' : 'white'), ink: false, shade: false, opacity: o.opacity }));
+
+  /* ---- everyday things, as they look in China. All stand on groundY at x; h = height. ---- */
+
+  /** Glass tea tumbler (玻璃杯): straight glass, tea leaves standing in pale tea, optional screw lid. */
+  k.teaglass = (x, groundY, o = {}) => scoped('teaglass', () => {
+    const h = o.h || 300, w = h * 0.42, top = groundY - h;
+    k.shadow(x, groundY, w * 0.75, h * 0.05, { lines: 2 });
+    const glass = [[x - w / 2, top + h * 0.12], [x + w / 2, top + h * 0.12], [x + w * 0.45, groundY], [x - w * 0.45, groundY]];
+    k.poly(glass, { fill: 'moonwhite', shade: 0.08 });
+    const lvl = top + h * 0.3;
+    k.poly([[x - w * 0.485, lvl], [x + w * 0.485, lvl], [x + w * 0.44, groundY - 3], [x - w * 0.44, groundY - 3]], { fill: o.tea || 'tea', ink: false });
+    k.line(x - w * 0.485, lvl, x + w * 0.485, lvl, { weight: 'fine' });
+    for (const [dx, dy, a] of [[-0.2, 0.55, -70], [0.12, 0.7, -110], [-0.05, 0.85, -95], [0.22, 0.45, -60]])
+      k.leaf(x + dx * w, top + dy * h, { len: h * 0.1, angle: a, width: 0.4, fill: 'olive', vein: false, weight: 'fine' });
+    k.line(x - w * 0.33, top + h * 0.2, x - w * 0.3, groundY - h * 0.12, { weight: 'fine', ink: 'white' });
+    if (o.lid !== false) k.rect(x - w * 0.53, top, w * 1.06, h * 0.13, { fill: o.lidFill || 'dai', shade: 0.2, radius: h * 0.02 });
+    return { top, rim: [x, top + h * 0.12] };
+  });
+
+  /** Vacuum flask (暖水瓶): tall body with a printed band, shoulder, cork, side handle. */
+  k.thermos = (x, groundY, o = {}) => scoped('thermos', () => {
+    const h = o.h || 460, r = h * 0.17, top = groundY - h, fill = o.fill || 'jade';
+    k.shadow(x, groundY, r * 1.4, h * 0.035, { lines: 2 });
+    k.tube([[x + r * 0.9, top + h * 0.32], [x + r * 1.55, top + h * 0.36], [x + r * 1.5, top + h * 0.62], [x + r * 0.95, top + h * 0.66]], h * 0.035, { fill: o.handle || 'dai' });
+    k.turned([[r * 0.55, 0], [r * 0.6, h * 0.035], [r * 0.93, h * 0.085], [r, h * 0.13], [r, h]], { cx: x, y: top, fill, shade: 0.3 });   // wide cylinder, short shoulder
+    k.rect(x - r * 0.5, top - h * 0.04, r * 1.0, h * 0.055, { fill: 'wood', radius: h * 0.01 });                         // cork
+    k.rect(x - r, groundY - h * 0.08, r * 2, h * 0.08, { fill: 'dai', weight: 'detail' });                               // base band
+    // printed flowers on the body: a few simple 5-petal blossoms (as on real flasks)
+    for (const [dx, dy, s] of [[-0.4, 0.35, 1], [0.3, 0.5, 0.85], [-0.15, 0.68, 0.95]]) {
+      const cx = x + dx * r, cy = top + dy * h, pr = r * 0.11 * s;
+      for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; k.circle(cx + Math.cos(a) * pr, cy + Math.sin(a) * pr, pr * 0.75, { fill: o.flowers || 'pink', weight: 'fine' }); }
+      k.dot(cx, cy, pr * 0.35, { fill: 'gamboge' });
+    }
+    return { top: [x, top - h * 0.04] };
+  });
+
+  /** Enamel mug (搪瓷杯): white enamel, dark rim and base band, loop handle. */
+  k.enamelmug = (x, groundY, o = {}) => scoped('enamelmug', () => {
+    const h = o.h || 260, r = h * 0.5, top = groundY - h, band = o.band || 'indigo';
+    k.shadow(x, groundY, r * 1.25, h * 0.06, { lines: 2 });
+    k.tube([[x + r * 0.92, top + h * 0.22], [x + r * 1.5, top + h * 0.25], [x + r * 1.48, top + h * 0.7], [x + r * 0.93, top + h * 0.72]], h * 0.07, { fill: 'white', shade: 0.25 });
+    const m = k.turned([[r, 0], [r * 0.99, h * 0.5], [r * 0.95, h]], { cx: x, y: top, fill: o.fill || 'white', rim: true, inside: o.inside || 'tea', shade: 0.18, rimRatio: 0.2 });
+    k.rect(x - r * 0.96, groundY - h * 0.07, r * 1.92, h * 0.07, { fill: band, ink: false });
+    k.ellipse(x, m.rim.y, r, r * 0.2, { weight: 'detail' });
+    k.arc(x, m.rim.y, r, r * 0.2, 0, 180, { weight: 'bold', ink: band });
+    return { rim: m.rim };
+  });
+
+  /** Rice bowl with a dome of rice and chopsticks resting across the rim (never stuck upright in the rice). */
+  k.ricebowl = (x, groundY, o = {}) => scoped('ricebowl', () => {
+    const w = o.w || 360, h = w * 0.42, top = groundY - h, fill = o.fill || 'moonwhite';
+    k.shadow(x, groundY, w * 0.55, w * 0.05, { lines: 2 });
+    // rice dome behind the rim
+    k.blob(x, top + h * 0.02, w * 0.4, { squash: 0.42, irregular: 0.05, bumps: 9, bump: 0.05, fill: 'rice', shade: 0.15 });
+    for (let i = 0; i < 9; i++) k.ellipse(x + (i - 4) * w * 0.07 + k.rand(-6, 6), top - h * 0.18 + k.rand(-8, 10), w * 0.012, w * 0.006, { weight: 'fine' });
+    k.turned([[w / 2, 0], [w * 0.44, h * 0.45], [w * 0.28, h * 0.84], [w * 0.17, h * 0.86], [w * 0.18, h]], { cx: x, y: top, fill, shade: 0.22 });
+    k.spline([[x - w * 0.42, top + h * 0.3], [x, top + h * 0.38], [x + w * 0.42, top + h * 0.3]], { weight: 'fine', ink: o.line || 'indigo' }); // blue line, like the classic bowl
+    if (o.chopsticks !== false) {
+      const y0 = top + h * 0.02, dy = h * 0.05;   // resting on the rim, in front of the rice
+      k.tube([[x - w * 0.62, y0 + dy], [x + w * 0.62, y0 - dy * 0.4]], [w * 0.022, w * 0.014], { fill: o.chopsticksFill || 'wood', weight: 'fine' });
+      k.tube([[x - w * 0.6, y0 + dy * 1.7], [x + w * 0.64, y0 + dy * 0.5]], [w * 0.022, w * 0.014], { fill: o.chopsticksFill || 'wood', weight: 'fine' });
+    }
+    return { rim: [x, top] };
+  });
 
   /** Window: (x, y) top-left, w × h. Frame, glass, glazing bars, sill. */
   k.window = (x, y, w, h, o = {}) => scoped('window', () => {

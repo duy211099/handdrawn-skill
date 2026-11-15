@@ -12,7 +12,7 @@ for f in handdrawn/examples/*.js; do
   node $R "$f" -o $O/$n.seed99.svg --seed 99 >/dev/null
   cmp -s $O/$n.svg $O/$n.seed99.svg && { echo "FAIL $n: --seed had no effect"; exit 1; }
   if grep -qE '(href|src)="(http|file|/)' $O/$n.svg; then echo "FAIL $n: external reference"; exit 1; fi
-  rm $O/$n.again.svg $O/$n.seed99.svg
+  rm -f $O/$n.again*.svg $O/$n.seed99*.svg
   echo "ok  $n"
 done
 node $R handdrawn/examples/cup.js -o $O/cup-anim.svg --animate --gif $O/cup.gif >/dev/null && echo "ok  cup.gif + animated svg"

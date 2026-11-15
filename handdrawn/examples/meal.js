@@ -1,5 +1,5 @@
 // Lunch on a wooden table: a bowl of phở, iced tea, a plate of herbs. Side view, Vietnamese labels.
-export const sheet = { seed: 9, width: 1200, height: 900 };
+export const sheet = { theme: 'classic', seed: 9, width: 1200, height: 900 };
 
 export function draw(k) {
   k.title('bữa trưa', { sub: 'a bowl of phở at noon' });
