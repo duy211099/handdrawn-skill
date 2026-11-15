@@ -9,7 +9,7 @@ Draws one picture as a self-contained **animated SVG**: wobbly ink lines of vary
 off the lines, on cream paper. Flat 2D, front or side view. The lines "boil" (the wobble is redrawn every 2 frames),
 so even a still subject looks alive, and the scene can add a small motion with `t`. For a 3D, isometric version use
 the **handdrawn-3d** skill instead. Labels and titles use a built-in hand-drawn
-stroke font that covers Latin and **Vietnamese**.
+stroke font that covers Latin, **Vietnamese** and **Chinese** (with pinyin, Hán-Việt and stroke-order vocab cards).
 
 Kit: `assets/kit.js` · renderer: `assets/render.mjs` · every function: `references/kit.md` (read it before
 writing a scene) · worked examples: `examples/` (cup, apple, cat, plant, house, meal).
@@ -75,6 +75,15 @@ show the PNG. If the scene moves, also check a few frames (see *Animation*).
 - **Text:** optional `k.title(...)` top-left, plus short lowercase margin labels (`k.label`) with leader lines,
   placed in empty margin space. Never boxes or speech bubbles floating over the drawing. Write labels in the
   user's language. Vietnamese is fully supported.
+- **Chinese vocabulary** (the drawing is for learning a Chinese word, e.g. "vẽ 茶", "picture for 电话"):
+  - **Concrete words** (things, animals, food, actions you can see): **picture only**. No title, no labels,
+    no text at all. The picture must carry the meaning by itself.
+  - **Abstract or hard words** (希望 hope, 因为 because, 习惯 habit, 但是 but…): picture + word card. Wide sheet
+    (`{ width: 1200, height: 760 }`), picture on the left showing a clear situation that means the word, and
+    `k.word({...})` on the right with pinyin, Hán-Việt and the Vietnamese meaning. The card is steady (no
+    animation) so it stays easy to read; keep the moving part in the picture. Double-check pinyin tones and
+    Hán-Việt readings, and add a `note` when the Hán-Việt meaning is a false friend.
+  - Draw things as they look in China unless the user asks otherwise. Example: `examples/vocab-hope.js`.
 - **Sheet:** 1000×1000 by default. For wide scenes use `export const sheet = { width: 1200, height: 900 }`.
   `--transparent` drops the paper.
 

@@ -55,6 +55,25 @@ Every drawing call returns its **shape** (`{ pts, closed, bbox }`), so you can r
 
 Vietnamese works as typed (`'phở bò'`, `'Đà Lạt'`, `'ở ấ ự'`): tone marks and â ă ê ô ơ ư đ are composed.
 
+Chinese characters (9,574, simplified + traditional) work inside any text call too (`'我喝茶。'`), and pinyin tone
+marks (ā á ǎ à, ü ǖ ǘ ǚ ǜ) are composed like Vietnamese ones.
+
+## Chinese (vocab cards for Vietnamese learners)
+
+| call | what it does |
+|---|---|
+| `k.word({ hanzi, pinyin, hanviet, meaning, note, x, y, size: 150, align, grid: false, boil: false })` | vocab card: **tone-coloured** characters, drawn steady (identical in every frame, no line boil) so they stay easy to read; under each character its pinyin (same tone colour) and Hán-Việt reading (caps); then the Vietnamese meaning and an optional red note. Returns `{ x, y, w, h, boxes, bottom }` |
+| `k.hanzi(str, { x, y, size: 160, align, grid: true\|'mi'\|false, ink, inks, order: false, ghost: true, hold: 0.3 })` | just the big characters. `order: true` writes them in stroke order as the animation plays (needs `frames: 48` in `sheet`). x,y = top-left of the first box (`align: 'center'` → x is the centre). `grid: 'mi'` = 米字格 |
+| `k.tianzige(x, y, size, { diagonals })` | an empty practice box |
+| `k.steady(() => { … })` | draw anything inside identically in every frame (no boil) |
+
+- `pinyin`: marked (`'diàn huà'`, `'diànhuà'`) or numbered (`'dian4 hua4'`, `'lv4'` → lǜ). One syllable per character
+  gets per-character colours: tone 1 red, 2 orange, 3 green, 4 blue, neutral grey.
+- `hanviet`: one reading per character, space-separated (`'điện thoại'`), so each sits under its character.
+- `note`: use it for false friends, where the Hán-Việt meaning differs from Mandarin
+  (走 zǒu: hán việt *tẩu* = chạy, but 走 = đi).
+- `grid: true` puts each character in a 田字格 box (`'mi'` = 米字格).
+
 ## Structure
 
 | call | what it does |
