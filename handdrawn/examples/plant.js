@@ -1,5 +1,5 @@
 // A leafy plant in a terracotta pot, front view.
-export const sheet = { theme: 'classic', seed: 7 };
+export const sheet = { seed: 7 };
 
 export function draw(k) {
   const cx = 500;

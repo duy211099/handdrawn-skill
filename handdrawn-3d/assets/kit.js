@@ -393,6 +393,43 @@ function glyph(ch) {
   return (GLYPH_CACHE[ch] = { w: g[0], strokes: parseStrokes(g[1]) });
 }
 
+/* -------------------- themes (kept in step with the 2D kit, so 2D and 3D pictures sit side by side)
+ * jianbihua (default): 简笔画 colours: the traditional palette, warm near-black ink, clean even lines (rough 0.1),
+ *            transparent background (--opaque gives the #F6EFE2 paper, no texture). Same colour names as 2D.
+ * classic:   the original marker look: cream mottled paper, wobbly overshooting ink, off-register washes. */
+const THEMES = {
+  classic: {
+    palette: { ...PALETTE, hair: '#4a3f38' },
+    rough: 1, transparent: false, texture: true, light: 0.05, dark: 0.1,
+  },
+  jianbihua: {
+    palette: (() => {
+      const C = { cinnabar: '#C94A3A', persimmon: '#E08A3C', gamboge: '#E9B949', malachite: '#5B9A6E', celadon: '#A8C9B0',
+        azurite: '#3E6A9E', ochre: '#A0703F', paperwhite: '#FFFDF7', skin: '#F0CDB0', grey: '#B9B6AF', hair: '#3B3634', blush: '#EBB4A3' };
+      const as = (name, ...keys) => Object.fromEntries(keys.map((k) => [k, C[name]]));
+      return { ...C, ink: '#2B2B2B', paper: '#F6EFE2', shadow: '#E3D8C4', charcoal: '#3B3634',
+        ...as('cinnabar', 'red', 'brick'), ...as('persimmon', 'coral', 'orange'),
+        ...as('gamboge', 'yellow', 'sand'), ...as('ochre', 'wood', 'brown', 'chocolate', 'tan'),
+        ...as('malachite', 'green', 'leaf', 'olive'), ...as('celadon', 'sage', 'mint', 'teal'),
+        ...as('azurite', 'sky', 'blue', 'navy', 'lilac', 'plum'),
+        ...as('paperwhite', 'white', 'cream'), ...as('grey', 'stone'), ...as('blush', 'pink') };
+    })(),
+    rough: 0.1, transparent: true, texture: false, light: 0.04, dark: 0.08,
+  },
+};
+let THEME = THEMES.jianbihua;
+let ROUGH = THEME.rough;
+/** Pick the look once per process, before drawing (render.mjs does it from --theme / sheet.theme). */
+export function setTheme(name = 'jianbihua', o = {}) {
+  const th = THEMES[name];
+  if (!th) throw new Error(`unknown theme ${name} (${Object.keys(THEMES).join(', ')})`);
+  Object.assign(PALETTE, th.palette);
+  THEME = th;
+  ROUGH = o.rough != null && !Number.isNaN(+o.rough) ? clamp(+o.rough, 0, 1.5) : th.rough;
+}
+export function themeInfo() { return { transparent: !!THEME.transparent, texture: !!THEME.texture }; }
+export const themes = Object.keys(THEMES);
+
 /* ------------------------------------------------------------------ the kit */
 
 const WEIGHTS = { outline: 2.3, detail: 1.6, fine: 1.1, hatch: 0.9, bold: 3.2 };
@@ -434,9 +471,9 @@ export function createKit(opts = {}) {
       const c = pts[0], rr = Math.max(w * 0.75, 1);
       return blobPath(c, rr, r);
     }
-    const wob = o.wobble == null ? 1 : o.wobble;
+    const wob = (o.wobble == null ? 1 : o.wobble) * ROUGH;
     // overshoot both ends
-    const os = o.overshoot == null ? 1 : o.overshoot;
+    const os = (o.overshoot == null ? 1 : o.overshoot) * ROUGH;
     const k0 = Math.min(1, L / 40);
     const e0 = os * (0.5 + r() * 2.2) * k0, e1 = os * (0.8 + r() * 3.2) * k0;
     const a = P[0], a2 = P[Math.min(3, P.length - 1)];
@@ -483,7 +520,7 @@ export function createKit(opts = {}) {
       const pin = 0.45 + 0.55 * smooth(si / (inLen || 1));
       const swell = 1 + 0.2 * Math.exp(-si / (T * 0.15 + 6));
       const pout = 1 - 0.62 * smooth((si - (T - outLen)) / (outLen || 1));
-      const noise = 1 + 0.12 * Math.sin((TAU * si) / lw + fw) + 0.06 * Math.sin((TAU * si) / (lw * 0.37) + fw2);
+      const noise = 1 + Math.min(1, ROUGH) * (0.12 * Math.sin((TAU * si) / lw + fw) + 0.06 * Math.sin((TAU * si) / (lw * 0.37) + fw2));
       const hw = (w / 2) * pin * swell * pout * noise * (o.pressure || 1);
       const cx = S[i][0] + nm[0] * off, cy = S[i][1] + nm[1] * off;
       L1.push([cx + nm[0] * hw, cy + nm[1] * hw]);
@@ -532,7 +569,7 @@ export function createKit(opts = {}) {
   function emitInk(sheetPts, closed, o = {}) {
     const r = rng();
     const w = weightOf(o.weight);
-    const pts = closed ? openLoop(sheetPts, r) : sheetPts;
+    const pts = closed ? (ROUGH < 0.3 ? resample(sheetPts.concat([sheetPts[0]]), 2.5) : openLoop(sheetPts, r)) : sheetPts;   // clean looks close their loops
     const d = inkPoly(pts, w, r, { overshoot: closed ? 0.35 : o.overshoot, wobble: o.wobble, stiff: o.stiff, pressure: o.pressure });
     body.push(`<path d="${d}" fill="${inkColor(o.ink)}"${o.opacity != null ? ` opacity="${o.opacity}"` : ''}/>`);
   }
@@ -551,7 +588,7 @@ export function createKit(opts = {}) {
     const sgn = signedArea(P) > 0 ? 1 : -1;
     const k = Math.min(1, size / 60);
     const reg = o.register == null ? 1 : o.register;
-    const ang = r() * TAU, mag = (1.1 + r() * 0.9) * k * reg;
+    const ang = r() * TAU, mag = (1.1 + r() * 0.9) * k * reg * ROUGH;
     const dx = Math.cos(ang) * mag, dy = Math.sin(ang) * mag;
     const per = polyLen(P.concat([P[0]]));
     const l1 = 60 + r() * 90, f1 = r() * TAU, f2 = r() * TAU;
@@ -563,7 +600,7 @@ export function createKit(opts = {}) {
       const tg = norm([b[0] - a[0], b[1] - a[1]]);
       const nm = [tg[1] * sgn, -tg[0] * sgn]; // inward
       if (i > 0) s += dist(P[i - 1], P[i]);
-      const inset = k * (0.9 + 1.3 * Math.sin((TAU * s) / l1 + f1) + 0.4 * Math.sin((TAU * s) / (l1 * 0.31) + f2)) * (o.inset == null ? 1 : o.inset);
+      const inset = k * (0.9 + 1.3 * Math.sin((TAU * s) / l1 + f1) + 0.4 * Math.sin((TAU * s) / (l1 * 0.31) + f2)) * (o.inset == null ? 1 : o.inset) * Math.min(1, ROUGH);
       out.push([P[i][0] + nm[0] * inset + dx, P[i][1] + nm[1] * inset + dy]);
     }
     return out;
@@ -1021,7 +1058,7 @@ export function createKit(opts = {}) {
       const Lw = lightW();
       const base = o.fill || 'stone';
       const tones = o.flat ? [soften(base), soften(base), soften(base)]
-        : [lighter(base, o.light == null ? 0.05 : o.light), soften(base), darker(base, o.dark == null ? 0.1 : o.dark)];
+        : [lighter(base, o.light == null ? THEME.light : o.light), soften(base), darker(base, o.dark == null ? THEME.dark : o.dark)];
       const ins = o.inside || base;
       const insideTones = o.inside ? [soften(ins), darker(ins, 0.06), darker(ins, 0.13)] : [darker(ins, 0.07), darker(ins, 0.12), darker(ins, 0.17)];
       const cosCrease = Math.cos(((o.crease == null ? 32 : o.crease) * Math.PI) / 180);
@@ -1488,6 +1525,84 @@ export function createKit(opts = {}) {
   let hasTitle = false;
   const title0 = k.title;
   k.title = (...a) => { hasTitle = true; return title0(...a); };
+
+  /* ---- Q版 (chibi) person, the same character as the 2D kit's k.chibi, built from solids ----
+   * Big head (~45% of the height), bean body, stubby limbs, dot eyes and blush painted on the face (decals, so they
+   * turn with the head and hide when it faces away). Local frame: facing −y, feet on z = 0, ~210 units tall at h 210.
+   *   at [x, y, z], turn (degrees about z: 0 faces the viewer's front), h (height), headTilt (degrees, + = look up),
+   *   expression 'neutral' | 'closed' | 'happy', shirt, pants, shoes, hair, skin
+   *   reach: { right: [x, y, z], left: [x, y, z] } → that arm is solved as a two-bone IK in 3D and the hand (a
+   *          round mitten) put there; without reach an arm hangs. rightPole / leftPole: elbow direction in the
+   *          person's frame (+x = the right side), default out to the side and down. Keep one pole per move.
+   * Points (at, reach) are in the caller's frame. k.chibiLayout(at, o) returns the anchors without drawing:
+   * { mouth, head, headR, shoulderR, shoulderL, neck, unit } (mouth = a point just in front of the lips). */
+  const CH = { neck: [0, 0, 122], head: [0, 0, 170], headR: 50, shR: [30, 2, 110], shL: [-30, 2, 110], upper: 44, fore: 42 };
+  const chibiXf = (at = [0, 0, 0], o = {}) => {
+    const sc = (o.h || 210) / 210, a = ((o.turn || 0) * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
+    const look = ((o.headTilt || 0) * Math.PI) / 180;
+    const toW = (p) => [at[0] + sc * (c * p[0] - sn * p[1]), at[1] + sc * (sn * p[0] + c * p[1]), at[2] + sc * p[2]];
+    const toL = (p) => { const q = [(p[0] - at[0]) / sc, (p[1] - at[1]) / sc, (p[2] - at[2]) / sc]; return [c * q[0] + sn * q[1], -sn * q[0] + c * q[1], q[2]]; };
+    // the head turns about the neck, about x: + headTilt lifts the face
+    const tipHead = (p) => { const d = sub3(p, CH.neck), cl = Math.cos(-look), sl = Math.sin(-look); return add3(CH.neck, [d[0], cl * d[1] - sl * d[2], sl * d[1] + cl * d[2]]); };
+    return { sc, toW, toL, tipHead };
+  };
+  k.chibiLayout = (at = [0, 0, 0], o = {}) => {
+    const X = chibiXf(at, o), R = CH.headR;
+    return { mouth: X.toW(X.tipHead([0, -R * 0.92, 149])), head: X.toW(X.tipHead(CH.head)), headR: R * X.sc,
+      neck: X.toW(CH.neck), shoulderR: X.toW(CH.shR), shoulderL: X.toW(CH.shL), unit: X.sc };
+  };
+  k.chibi = (at = [0, 0, 0], o = {}) => {
+    const X = chibiXf(at, o), R = CH.headR, HC = CH.head;
+    const shirt = o.shirt || 'orange', pants = o.pants || 'blue', shoes = o.shoes || 'charcoal', hair = o.hair || 'hair', skin = o.skin || 'skin';
+    const out = k.chibiLayout(at, o);
+    group3({ at, rotate: { z: o.turn || 0 }, scale: X.sc }, () => {
+      for (const sd of [-1, 1]) {                                                   // legs, shoes
+        k.cylinder([sd * 15, 0, 6], 12, 40, { fill: pants, r2: 13 });
+        k.sphere([sd * 15, -5, 6], 13, { fill: shoes, scale: [1, 1.35, 0.55] });
+      }
+      k.lathe([0, 0, 40], [[30, 0], [37, 18], [37, 46], [30, 72], [16, 84], [0, 86]], { fill: shirt, smooth: true });
+      group3({ about: CH.neck, rotate: { x: -(o.headTilt || 0) }, }, () => {
+        k.sphere(add3(HC, [0, 6, 9]), R * 1.08, { fill: hair, scale: [1.03, 1, 0.95] });                     // hair cap, sits back
+        const head = k.sphere(HC, R, { fill: skin });
+        k.sphere(add3(HC, [0, -4, 30]), R * 0.9, { fill: hair, scale: [1.12, 0.98, 0.45], creases: false }); // fringe
+        const onHead = (x, z) => [x, -Math.sqrt(Math.max(0, R * R - x * x - (z - HC[2]) ** 2)) - 0.4, z];
+        const disc = (cp, rx, rz, n = 12) => {
+          const nn = unit3(sub3(cp, HC)), e1 = unit3(cross3([0, 0, 1], nn)), e2 = cross3(nn, e1);
+          return Array.from({ length: n }, (_, i) => { const q = (i / n) * TAU; return add3(cp, add3(mul3(e1, rx * Math.cos(q)), mul3(e2, rz * Math.sin(q)))); });
+        };
+        const ex = o.expression || 'neutral';
+        for (const sd of [-1, 1]) {
+          const e = onHead(sd * 19, 165), nrm = unit3(sub3(e, HC));
+          if (ex === 'closed') k.line([onHead(sd * 19 - 6, 166), onHead(sd * 19, 163), onHead(sd * 19 + 6, 166)], { on: head, normal: nrm, smooth: true, weight: 'detail' });
+          else if (ex === 'happy') k.line([onHead(sd * 19 - 6, 163), onHead(sd * 19, 167), onHead(sd * 19 + 6, 163)], { on: head, normal: nrm, smooth: true, weight: 'detail' });
+          else k.panel(disc(e, 4.5, 5.5), { on: head, fill: 'ink', flat: true, ink: false });
+          k.panel(disc(onHead(sd * 30, 151), 7, 4.5), { on: head, fill: 'blush', flat: true, ink: false });
+        }
+        k.line([onHead(-6, 150), onHead(0, ex === 'happy' ? 145 : 147), onHead(6, 150)], { on: head, normal: [0, -1, 0], smooth: true, weight: 'detail' });
+      });
+      // arms: hanging, or a two-bone IK in 3D with a pole (bones keep their length, the elbow never flips)
+      for (const [sd, key] of [[1, 'right'], [-1, 'left']]) {
+        const Sh = sd > 0 ? CH.shR : CH.shL, target = o.reach && o.reach[key];
+        if (!target) {
+          k.sphere([sd * 38, -4, 60], 11, { fill: skin });
+          k.tube([Sh, [sd * 38, 0, 88], [sd * 38, -3, 66]], [10, 9], { fill: shirt });
+          out[sd > 0 ? 'handR' : 'handL'] = X.toW([sd * 38, -4, 60]);
+          continue;
+        }
+        const T = X.toL(target), a = CH.upper, b = CH.fore;
+        const d = sub3(T, Sh), dist = Math.min(len3(d), a + b - 0.5), n = unit3(d);
+        const pl = o[key + 'Pole'] || [0.8, 0.1, -0.6], pole = unit3([sd * pl[0], pl[1], pl[2]]);
+        const q = unit3(sub3(pole, mul3(n, dot3(pole, n))));
+        const ca = clamp((a * a + dist * dist - b * b) / (2 * a * dist), -1, 1), sa = Math.sqrt(1 - ca * ca);
+        const E = add3(Sh, add3(mul3(n, a * ca), mul3(q, a * sa))), Wr = add3(Sh, mul3(n, dist));
+        k.sphere(Wr, 11.5, { fill: skin });                                          // the hand first, so the arm is cut at it
+        k.tube([Sh, E, Wr], [10, 9], { fill: shirt });
+        out[sd > 0 ? 'handR' : 'handL'] = X.toW(Wr);
+        out[sd > 0 ? 'elbowR' : 'elbowL'] = X.toW(E);
+      }
+    });
+    return out;
+  };
   return k;
 }
 
@@ -1706,12 +1821,12 @@ export function svgDocument(frames, o) {
   const { W, H } = o;
   const size = o.size || W;
   const pxH = Math.round((size * H) / W);
-  const paperOn = !o.transparent;
+  const paperOn = !o.transparent, texture = paperOn && THEME.texture;
   const pseed = (hashStr('paper' + o.seed) % 997) + 1;
   const parts = [];
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${pxH}" viewBox="0 0 ${W} ${H}">`);
   parts.push('<defs>');
-  if (paperOn) {
+  if (texture) {
     parts.push(`<filter id="mottle" x="0" y="0" width="100%" height="100%" filterUnits="userSpaceOnUse">` +
       `<feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="2" seed="${pseed + 7}"/>` +
       `<feColorMatrix type="matrix" values="0 0 0 0 0.55  0 0 0 0 0.45  0 0 0 0 0.3  1.2 0 0 0 -0.5"/></filter>`);
@@ -1721,7 +1836,7 @@ export function svgDocument(frames, o) {
   parts.push('</defs>');
   if (paperOn) {
     parts.push(`<rect width="${W}" height="${H}" fill="${o.paper ? soften(o.paper) : PALETTE.paper}"/>`);
-    parts.push(`<rect width="${W}" height="${H}" filter="url(#mottle)" opacity="0.16"/>`);
+    if (texture) parts.push(`<rect width="${W}" height="${H}" filter="url(#mottle)" opacity="0.16"/>`);
   }
   if (frames.length === 1) parts.push(...frames[0].body);
   else {

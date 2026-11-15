@@ -1,15 +1,17 @@
 ---
 name: handdrawn-3d
-description: 3D version of handdrawn. Draw an object, animal, plant, food or small scene as a 3D model rendered in a hand-drawn ink-and-marker look (isometric by default, flat light/mid/dark marker tones, wobbly ink outlines, cream paper) and deliver it as one self-contained looping animated SVG where something in the object moves (a lid rattles, bread pops, sails turn, steam rises), plus a PNG still or GIF. Use when the user asks for 3D, isometric or a 3D-modelled drawing ("draw a teapot in 3D", "an isometric toaster popping", "/handdrawn-3d windmill"), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (gears turning, a drawer sliding out, a house cut open). Not for vocab cards, people, faces, expressions or gestures, and not for ordinary flat drawings of animals, plants, food or single objects: those use the 2D handdrawn skill. Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: 3D version of handdrawn, in the same default 简笔画 + Q版 look (traditional palette, clean warm-ink outline, soft light/dark tones, chibi people; the classic ink-and-marker look on cream paper is --theme classic). Draw an object, person, animal, plant, food or small scene as a 3D model and deliver it as one self-contained looping animated SVG where something in the object moves (a lid rattles, bread pops, sails turn, steam rises), plus a PNG still or GIF. Use when the user asks for 3D, isometric or a 3D-modelled drawing ("draw a teapot in 3D", "an isometric toaster popping", "/handdrawn-3d windmill"), when a person acts in depth (a kid drinking water, eating, reaching toward the viewer: the Q版 k.chibi with 3D arm IK), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (gears turning, a drawer sliding out, a house cut open). Not for vocab cards, faces, expressions or gestures, and not for ordinary flat drawings of animals, plants, food or single objects: those use the 2D handdrawn skill. Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn-3d
 
-You model the subject in 3D with a few simple solids, and the kit draws it by hand. Faces get three flat marker
-tones from a light at the upper left. Neighbouring faces of the same tone merge into one wash. The silhouette is
-inked heavy and the creases lighter, with wobbly, tapering lines, on cream paper. The scene is drawn once per frame
-with `t` going round one loop. The output is a **looping animated SVG**: the frames are switched by CSS, with no
-script, so it plays in browsers and `<img>` tags. Text uses a built-in hand-drawn font with full **Vietnamese** support.
+You model the subject in 3D with a few simple solids, and the kit draws it by hand. The default look matches the
+2D skill: **简笔画 + Q版** (`jianbihua`): the traditional palette (same colour names as 2D), a clean warm-ink
+outline, soft light/mid/dark tones from a light at the upper left, transparent background (`--opaque` for the
+#F6EFE2 paper). **People are the same Q版 chibi** as in 2D: `k.chibi`. `--theme classic` gives the original look:
+wobbly marker ink and off-register washes on mottled cream paper. The scene is drawn once per frame with `t` going
+round one loop. The output is a **looping animated SVG**: frames switched by CSS, no script, so it plays in
+browsers and `<img>` tags. Text uses a built-in hand-drawn font with full **Vietnamese** support.
 
 Kit: `assets/kit.js` · renderer: `assets/render.mjs` · every function and option: `references/kit.md` (**read it
 before writing a scene**) · worked examples: `examples/` (cup, teapot, toaster, windmill, drink: read the closest one; drink = a person,
@@ -23,9 +25,11 @@ Decide before drawing, in this order. The first rule that matches wins:
    "简笔画", "Q版", "/handdrawn" → 2D.
 2. **Vocab cards, lessons, a set or series → 2D.** Every card must share one look, and only 2D has the word
    layout, pinyin, hanzi and 24 fps.
-3. **People, faces, expressions, emotions, gestures → 2D.** The Q版 chibi exists only in 2D. People built from 3D
-   solids look blocky and take many rounds. When a person **acts in depth** (drinks, reaches, opens, holds),
-   stay 2D: `reach` already solves the arm in 3D and projects it.
+3. **People: faces, expressions, emotions, gestures → 2D. A person acting in depth → 3D.** When the action
+   brings something toward or away from the body (drinking, eating, a phone to the ear, putting on a hat,
+   reaching forward), 2D can only fake it: the object slides across the face in the picture plane. 3D puts arm,
+   object and head in one space (`k.chibi` with `reach` in the 3D kit; see `handdrawn-3d/examples/drink.js`).
+   The same Q版 chibi in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
 4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
 5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
    machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
@@ -62,6 +66,9 @@ The SVG itself needs nothing.
    - round things you could turn on a wheel → `k.lathe` (containers get `wall:`), `k.cylinder`, `k.sphere`
    - boxy things → `k.box` (`round:` for soft appliance corners), odd outlines → `k.extrude`
    - handles, spouts, pipes, legs, cables, stems → `k.tube`, **starting inside the body** (it is cut at the surface)
+   - **people → `k.chibi(at, { turn, headTilt, expression, reach: { right: [x, y, z] } })`**: the Q版 person,
+     arms solved by 3D IK. Place held things first from `k.chibiLayout(at, o).mouth` etc., draw them, then the chibi
+   - things that follow a motion (a head after a hand, water, leaves, a lid) → `k.follow` on the main motion
    - contents of a container → `{ in: container }`; flat marks on a face → `k.panel` / `k.line` with `{ on: solid }`
    - turn the whole subject with `k.group({ rotate: { z: 45 } }, …)` when its "side view" should face the viewer
      (a teapot's spout to the left and handle to the right)
@@ -90,7 +97,7 @@ go somewhere that doesn't play SVG animation (chat apps, some email clients).
 
 ## Style rules
 
-- **One look:** ink + flat marker tones on paper. No gradients, glows, blur, opacity tricks, SVG `<text>` or raw
+- **One look:** the theme's ink + flat tones (default `jianbihua`, matching the 2D skill). No gradients, glows, blur, opacity tricks, SVG `<text>` or raw
   SVG. Use only the kit.
 - **Colour:** palette names (see `references/kit.md`), 3–5 per picture plus ink. Palette names look best; any hex is
   softened. Light, mid and dark come from each fill automatically. Don't fake shading with extra solids.

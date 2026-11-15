@@ -1,32 +1,58 @@
 # handdrawn — Claude Code skills for hand-drawn illustrations
 
-**Default look: 简笔画 + Q版.** Objects are drawn as 简笔画 (Chinese simple-stroke drawing): flat traditional
-colours and a soft brush outline. People are Q版 (chibi): big heads, dot eyes, blush, and a thick even outline.
-The classic ink-and-marker look below is `--theme classic`.
+Ask Claude for a picture ("a teapot", "a kid drinking water", "một bát phở") and it draws it. The result is one
+self-contained **looping animated SVG** (frames switched by CSS, no script: it plays in browsers and `<img>` tags),
+plus a PNG still and, if you want, a GIF.
 
-Ask Claude for a picture ("a teapot", "a cat asleep on a windowsill", "một bát phở") and it draws it in an
-ink-and-marker look: wobbly lines of varying width, marker washes slightly off-register on cream paper. The
-result is one self-contained **looping animated SVG** (frames switched by CSS, no script: it plays in browsers
-and `<img>` tags), plus a PNG still and, if you want, a GIF.
-
-There are two skills:
+**One look, two skills.** Both draw in the same default style, **简笔画 + Q版**: objects as 简笔画 (Chinese
+simple-stroke drawing) with flat traditional colours and a clean warm-ink outline; people as Q版 (chibi): big
+heads, dot eyes, blush. Same palette, same ink, same chibi in 2D and 3D, so pictures from either sit side by side.
+The original ink-and-marker look on cream paper is `--theme classic` in both.
 
 | skill | what it draws | when Claude uses it |
 |---|---|---|
-| **`handdrawn`** | flat 2D, front or side view, like a children's-book or field-notebook sketch. The lines "boil" and the scene can add a small motion (steam, a swaying tail) | the default: vocab cards, people, faces, gestures, animals, plants, food, single objects |
-| **`handdrawn-3d`** | the subject modelled in 3D from simple solids, drawn isometric (or any camera angle) with flat light/mid/dark marker tones. Something in the object moves: a lid rattles, toast pops, sails turn | when you ask for 3D / isometric (or `/handdrawn-3d`), or the subject is a machine, building, room, furniture or vehicle that moves in depth. Both skills carry the same "2D or 3D?" rule |
+| **`handdrawn`** | flat 2D, front or side view | the default: vocab cards, faces, expressions, gestures, animals, plants, food, single objects |
+| **`handdrawn-3d`** | the subject modelled in 3D from simple solids, any camera angle, soft light/dark tones | when you ask for 3D / isometric (or `/handdrawn-3d`), a person acting **in depth** (drinking, reaching), or a machine, building, room, furniture or vehicle |
 
-### handdrawn (2D)
+Both skills carry the same ordered **"2D or 3D?"** rule in their descriptions, so Claude picks one and says so.
 
-![six examples: a cup, an apple, a cat, a plant in a pot, a house, a table with a bowl of phở](docs/preview.jpg)
+## Demo: the same five prompts, 2D and 3D
 
-<img src="docs/cat-small.gif" width="280" alt="animated cat: the tail sways and the lines boil">
+Rendered with `bash docs/demo/build.sh` (default look, on paper). Click a picture for the animated SVG.
 
-### handdrawn-3d
+| prompt | `handdrawn` (2D) | `handdrawn-3d` |
+|---|---|---|
+| a cup of coffee on a saucer, steaming | [<img src="docs/demo/2d-cup.png" width="220" alt="2D cup of coffee">](docs/demo/2d-cup.svg) | [<img src="docs/demo/3d-cup.png" width="220" alt="3D cup of coffee">](docs/demo/3d-cup.svg) |
+| an apple with a leaf | [<img src="docs/demo/2d-apple.png" width="220" alt="2D apple">](docs/demo/2d-apple.svg) | [<img src="docs/demo/3d-apple.png" width="220" alt="3D apple, the leaf flutters">](docs/demo/3d-apple.svg) |
+| a leafy plant in a pot | [<img src="docs/demo/2d-plant.png" width="220" alt="2D potted plant">](docs/demo/2d-plant.svg) | [<img src="docs/demo/3d-plant.png" width="220" alt="3D potted plant, stems sway">](docs/demo/3d-plant.svg) |
+| a small house with a tree | [<img src="docs/demo/2d-house.png" width="220" alt="2D house with a tree">](docs/demo/2d-house.svg) | [<img src="docs/demo/3d-house.png" width="220" alt="3D house, smoke and a swaying tree">](docs/demo/3d-house.svg) |
+| a kid drinking a glass of water | [<img src="docs/demo/2d-drink.png" width="220" alt="2D chibi with a glass">](docs/demo/2d-drink.svg) | [<img src="docs/demo/3d-drink.png" width="220" alt="3D chibi drinking">](docs/demo/3d-drink.svg) |
 
-![four 3D examples: a mug of coffee on a saucer, a teapot on a trivet, a toaster, a windmill on a hill](docs/preview-3d.jpg)
+Where 3D wins: the drinking kid. The glass comes *toward* the face, which 2D can only fake (the glass slides
+across the cheek); in 3D the arm, glass and head share one space and line up by construction.
 
-<img src="docs/toaster-small.gif" width="280" alt="animated toaster: the bread pops up and drops back">
+### The classic look (`--theme classic`)
+
+Wobbly lines of varying width and marker washes slightly off-register on cream paper.
+
+![six classic 2D examples: a cup, an apple, a cat, a plant in a pot, a house, a table with a bowl of phở](docs/preview.jpg)
+
+![four classic 3D examples: a mug of coffee, a teapot on a trivet, a toaster, a windmill on a hill](docs/preview-3d.jpg)
+
+## Motion that feels physical, without a video model
+
+Video models (Flow, Veo) get physical motion for free because they learned it, but they cost a lot per clip. Here
+every frame is computed, so the physics is written into the kit:
+
+- **Keyframe the cause, simulate the effect.** Only the main motion gets beats (`k.motion`). Everything it drags
+  along uses `k.follow`: second-order dynamics (a mass on a spring, after t3ssel8r's *Giving Personality to
+  Procedural Animations using Math*), simulated over a few warm-up loops and cached, so it loops seamlessly. A head
+  tips back a beat after the glass; leaves and a tree crown swing after the breeze and settle.
+- **Water** keeps its volume and a level surface in a tipping glass. "Up" for the water is gravity minus the
+  glass's acceleration (`k.accel`), passed through a spring, so it sloshes and rings out.
+- **Arms** are a two-bone IK solved in 3D with a fixed pole vector, then projected (2D) or drawn (3D): bones keep
+  their length, the elbow never flips, and the arm foreshortens when the hand passes in front of the shoulder.
+- **Paper stop-motion** reveals (`k.pop`, `k.drop`) treat parts as rigid cut-outs that slide, fall and bounce.
 
 ### Chinese vocab pictures
 
@@ -36,17 +62,17 @@ detail: a wave is an open five-finger hand swinging, framed waist-up. Abstract w
 under the picture: characters, tone-coloured pinyin, Hán-Việt reading and the Vietnamese meaning. For
 flashcards, `--card` also writes a picture+card face and a characters-only face.
 
-Vocab pictures use the **Shēng** look by default (`--theme sheng`): flat #f7f6f2 paper, #191d24 ink, Pleco tone
-colours on the pinyin, pinyin stacked above the hanzi. Ordinary drawings keep the classic cream paper
-(`--theme sheng` works for those too).
+Vocab pictures use the default 简笔画 + Q版 look. `--theme sheng` gives the Shēng design-system look: flat
+#f7f6f2 paper, #191d24 ink, Pleco tone colours on the pinyin, pinyin stacked above the hanzi.
 
 Chinese styling comes from the subject and the line, not motifs. People default to black hair with a few real
 hairstyles. Pieces draw everyday things as they look in China: a glass tea tumbler, a thermos, an enamel mug,
 a rice bowl with chopsticks. The palette has traditional colour names (藤黄, 赭石, 花青, 黛, 月白, 青瓷).
 `--stroke brush` gives a gongbi-style brush line.
 
-`--theme jianbihua` (简笔画) is a flashcard set style: flat fills, a soft brush outline, a fixed set of traditional
-colours, a transparent background and automatic framing, so every card in a set matches.
+The default `jianbihua` (简笔画) theme is built for flashcard sets: flat fills, a soft brush outline, a fixed set
+of traditional colours, a transparent background (`--opaque` for paper) and automatic framing, so every card in a
+set matches.
 
 The design follows research on pictures in vocabulary learning: plain, unambiguous pictures (decoration and
 ambiguity hurt), motion only where it carries the meaning (animation helps most for actions; Höffler & Leutner
@@ -71,7 +97,9 @@ Requires Node 22.12+ (scene files are ES modules, detected automatically). SVG o
 
 In Claude Code:
 
-> draw a cat asleep on a windowsill, with a small label
+> draw a cat asleep on a windowsill
+>
+> a kid drinking a glass of water, in 3D
 >
 > /handdrawn-3d a toaster popping
 
@@ -88,9 +116,11 @@ node handdrawn/assets/render.mjs handdrawn/examples/cup.js -o out/cup.svg --gif 
 node handdrawn/assets/render.mjs handdrawn/examples/apple.js -o out/apple.svg --still
 
 # 3D
-node handdrawn-3d/assets/render.mjs handdrawn-3d/examples/teapot.js -o out/teapot.svg --png --strip
+node handdrawn-3d/assets/render.mjs handdrawn-3d/examples/drink.js -o out/drink.svg --png --strip
+node handdrawn-3d/assets/render.mjs handdrawn-3d/examples/teapot.js -o out/teapot.svg --theme classic   # the original look
 
 tests/verify.sh      # render all examples of both skills, check determinism + self-containment, build GIFs
+bash docs/demo/build.sh   # re-render the 2D vs 3D demo above
 ```
 
 ## What's inside
@@ -101,12 +131,14 @@ handdrawn/                  2D skill
   assets/kit.js             the drawing kit (plain JS, no deps, Node + browser)
   assets/render.mjs         scene → animated SVG / PNG / thumbnail / GIF
   assets/gif.mjs            tiny GIF encoder (median-cut palette, ordered dither, LZW)
-  examples/                 cup, apple, cat, plant, house, meal
+  examples/                 cup, apple, cat, plant, house, meal, vocab-* (Chinese words; vocab-drink = physics)
   references/kit.md         every kit function
 handdrawn-3d/               3D skill (same layout)
-  assets/kit.js             the 2D kit's ink, wash and font + a 3D layer: camera, solids, shading, sorting
+  assets/kit.js             the 2D kit's ink, wash, font and themes + a 3D layer: camera, solids, shading,
+                            sorting, k.chibi, k.mesh, k.follow
   assets/render.mjs         also measures every frame for stable framing; --strip for a contact sheet
-  examples/                 cup, teapot, toaster, windmill
+  examples/                 cup, apple, plant, house, teapot, toaster, windmill, drink (chibi + IK + water)
+docs/demo/                  the 2D vs 3D demo: scenes/, build.sh, rendered SVG + PNG
 tests/                      verify.sh + test sheets
 ```
 

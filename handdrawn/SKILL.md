@@ -1,6 +1,6 @@
 ---
 name: handdrawn
-description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 (chibi) people by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, people, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead only when the user asks for 3D / isometric, or the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (a toaster popping, a drawer sliding out, a windmill turning). Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 (chibi) people by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead when the user asks for 3D / isometric, when a person acts in depth (drinking, eating, reaching toward the viewer), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (a toaster popping, a drawer sliding out, a windmill turning). Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn
@@ -28,9 +28,11 @@ Decide before drawing, in this order. The first rule that matches wins:
    "简笔画", "Q版", "/handdrawn" → 2D.
 2. **Vocab cards, lessons, a set or series → 2D.** Every card must share one look, and only 2D has the word
    layout, pinyin, hanzi and 24 fps.
-3. **People, faces, expressions, emotions, gestures → 2D.** The Q版 chibi exists only in 2D. People built from 3D
-   solids look blocky and take many rounds. When a person **acts in depth** (drinks, reaches, opens, holds),
-   stay 2D: `reach` already solves the arm in 3D and projects it.
+3. **People: faces, expressions, emotions, gestures → 2D. A person acting in depth → 3D.** When the action
+   brings something toward or away from the body (drinking, eating, a phone to the ear, putting on a hat,
+   reaching forward), 2D can only fake it: the object slides across the face in the picture plane. 3D puts arm,
+   object and head in one space (`k.chibi` with `reach` in the 3D kit; see `handdrawn-3d/examples/drink.js`).
+   The same Q版 chibi in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
 4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
 5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
    machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
