@@ -1,6 +1,6 @@
 ---
 name: handdrawn
-description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 (chibi) people by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"). Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 (chibi) people by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead when the user asks for 3D / isometric, when a person acts in depth (drinking, eating, reaching toward the viewer), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (a toaster popping, a drawer sliding out, a windmill turning). Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn
@@ -19,6 +19,31 @@ stroke font that covers Latin, **Vietnamese** and **Chinese** (with pinyin, Hán
 
 Kit: `assets/kit.js` · renderer: `assets/render.mjs` · every function: `references/kit.md` (read it before
 writing a scene) · worked examples: `examples/` (cup, apple, cat, plant, house, meal).
+
+## 2D or 3D? (shared with the other skill: the same rule in both)
+
+Decide before drawing, in this order. The first rule that matches wins:
+
+1. **The user names it.** "3D", "isometric", "model", "/handdrawn-3d" → 3D. "flat", "icon", "sticker", "card",
+   "简笔画", "Q版", "/handdrawn" → 2D.
+2. **Vocab cards, lessons, a set or series → 2D.** Every card must share one look, and only 2D has the word
+   layout, pinyin, hanzi and 24 fps.
+3. **People: faces, expressions, emotions, gestures → 2D. A person acting in depth → 3D.** When the action
+   brings something toward or away from the body (drinking, eating, a phone to the ear, putting on a hat,
+   reaching forward), 2D can only fake it: the object slides across the face in the picture plane. 3D puts arm,
+   object and head in one space (`k.chibi` with `reach` in the 3D kit; see `handdrawn-3d/examples/drink.js`).
+   The same Q版 chibi in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
+4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
+5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
+   machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
+   and furniture, vehicles, a product shot, "how it goes together", or a container where you need to see in
+   from above. The motion happens **in depth** (a hinge, a slide toward the viewer, a turn about a vertical
+   axis), or several parts sit behind one another.
+6. **Unsure → 2D**, and offer the other in one line ("want this as an isometric 3D model too?").
+
+Cost to keep in mind: 2D renders in about a second, 24 fps, a few hundred KB. 3D takes 1–16 s, 8–12 fps, ~1 MB.
+
+If the rule picks 3D, say so in one line and use the other skill instead.
 
 ## Setup (once)
 

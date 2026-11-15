@@ -13,7 +13,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve, basename, extname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createKit, svgDocument } from './kit.js';
+import { createKit, svgDocument, setTheme, themeInfo } from './kit.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +35,8 @@ const args = parseArgs(process.argv.slice(2));
 if (!args._[0] || args.help) {
   console.log(`usage: node render.mjs scene.js -o out.svg [--png out.png] [--thumb [out-128.png]] [--gif out.gif]
                  [--frames 16] [--fps 12] [--boil 2] [--still] [--at 0] [--seed N] [--size 1000]
-                 [--transparent] [--grid] [--gif-size 560] [--strip [out-frames.png]]`);
+                 [--transparent] [--grid] [--gif-size 560] [--strip [out-frames.png]]
+                 [--theme jianbihua|classic] [--rough 0..1] [--opaque]`);
   process.exit(args.help ? 0 : 1);
 }
 
@@ -45,7 +46,9 @@ if (typeof scene.draw !== 'function') { console.error(`${scenePath}: must export
 const sheet = scene.sheet || {};
 const W = +(sheet.width || 1000), H = +(sheet.height || 1000);
 const seed = args.seed != null && args.seed !== true ? +args.seed : sheet.seed != null ? sheet.seed : 1;
-const transparent = !!(args.transparent || sheet.transparent);
+// look: jianbihua by default (same as the 2D skill); --theme classic for the original marker-on-paper look
+setTheme(args.theme && args.theme !== true ? args.theme : sheet.theme || 'jianbihua', { rough: args.rough != null && args.rough !== true ? +args.rough : sheet.rough });
+const transparent = args.opaque ? false : !!(args.transparent || sheet.transparent || themeInfo().transparent);
 const size = args.size && args.size !== true ? +args.size : W;
 const out = args.out || join(dirname(scenePath), basename(scenePath, extname(scenePath)) + '.svg');
 const camera = sheet.camera || {};

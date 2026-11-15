@@ -1,5 +1,5 @@
 // An apple with a leaf, side view.
-export const sheet = { theme: 'classic', seed: 2 };
+export const sheet = { seed: 2 };
 
 export function draw(k) {
   k.shadow(510, 835, 300, 34, { lines: 3 });

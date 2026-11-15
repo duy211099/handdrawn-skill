@@ -1,5 +1,5 @@
 // A small house with a tree and shrubs, front view.
-export const sheet = { theme: 'classic', seed: 3 };
+export const sheet = { seed: 3 };
 
 export function draw(k) {
   k.title('number twelve', { sub: 'a small house, front view' });

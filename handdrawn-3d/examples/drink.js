@@ -7,14 +7,9 @@
 //   water  the inside of the glass clipped by a level plane, volume kept by bisection; "up" for the water is
 //          gravity minus the glass's acceleration, swung by a spring (k.follow), so it sloshes and rings out
 // part        call                       where (person frame: x = their left→right, -y = the way they face, z up)
-// legs/shoes  cylinder / sphere          x ±15, z 0..44                              blue / charcoal
-// body        lathe { smooth }           z 40..124, bean                             orange
-// head        sphere r 50                z 172, tips about the neck                   skin
-// hair        sphere r 55 (cap) + fringe behind / over the head                       charcoal
-// face        spheres + line             eyes, blush, mouth on the front              charcoal, blush
+// person     k.chibi                    the kit's Q版 person, right hand reaching       orange / blue
 // glass       lathe { wall }             r 17→21, h 52, held in the right hand        white
 // water       mesh (in: glass)           level surface, fill 0.6                       sky
-// arms        tube r 10 + sphere hands   right IK to the glass (near side), left hangs  orange, skin
 export const sheet = { seed: 3, frames: 24, fps: 8, camera: { yaw: 30, pitch: 18 } };
 
 const TAU = Math.PI * 2;
@@ -88,12 +83,8 @@ function toMesh(polys) {
   return { V, F };
 }
 
-// ---- the person (facing -y)
-const NECK = [0, 0, 122], HEAD_C = [0, 0, 170], HEAD_R = 50;
-const SHOULDER_R = [30, 2, 110], SHOULDER_L = [-30, 2, 110], UPPER = 44, FORE = 42;
-const headPoint = (p, tilt) => add(NECK, rotX(sub(p, NECK), tilt));                // head tips about the neck (− = back)
-const MOUTH = [0, -HEAD_R * 0.86, 150];
-
+// ---- the person: the kit's Q版 chibi (facing -y). k.chibiLayout gives the mouth before drawing.
+const WHO = { shirt: 'orange', pants: 'blue', expression: 'neutral' };
 // drinking starts when the water reaches the near rim: find that tilt once (level surface), then tip a little past it
 const WET_TILT = (() => {
   const wet = (tl) => water([0, 0, 0], -tl, [0, 0, 1]).level >= rotX([0, GR1, GH], -tl)[2] - 0.5;
@@ -103,27 +94,18 @@ const WET_TILT = (() => {
 })();
 // the glass's pose at loop time u. Near rim point (the side toward the face, +y in glass coordinates) → the lips.
 const REST_RIM = [14, -46, 110];
-function glassPose(u, headTilt) {
+function glassPose(u, lips) {
   const s = S(u), sip = SIP(u);
-  const tilt = -(s * (WET_TILT + 4) + 8 * sip);                                           // − tips the top toward the face
-  const lips = add(headPoint(MOUTH, headTilt), [0, -3, -2]);
+  const tilt = -(s * (WET_TILT + 4) + 8 * sip);                                     // − tips the top toward the face
   const rim = lerp3(REST_RIM, lips, s);
   const pos = sub(rim, rotX([0, GR1, GH], tilt));                                   // glass base centre
   return { s, tilt, pos, centre: add(pos, rotX([0, 0, GH * 0.35], tilt)) };
 }
 
-// two-bone IK in 3D with a pole: elbow on the pole's side of shoulder→wrist, bones keep their length
-function ik(Sh, T, a, b, pole) {
-  let d = sub(T, Sh), dist = Math.min(len(d), a + b - 0.5);
-  const n = unit(d);
-  const q = unit(sub(pole, mul(n, dot(pole, n))));
-  const ca = Math.max(-1, Math.min(1, (a * a + dist * dist - b * b) / (2 * a * dist))), sa = Math.sqrt(1 - ca * ca);
-  return { E: add(Sh, add(mul(n, a * ca), mul(q, a * sa))), W: add(Sh, mul(n, dist)) };
-}
-
 export function draw(k, t = 0) {
-  const headTilt = -k.follow(t, (u) => 14 * S(u) + 5 * SIP(u), { key: 'head3d', f: 1.4, z: 0.6 });
-  const pose = (u) => glassPose(u, -k.follow(u, (v) => 14 * S(v) + 5 * SIP(v), { key: 'head3d', f: 1.4, z: 0.6 }));
+  // the head tips back (looks up) a beat after the glass
+  const look = (u) => k.follow(u, (v) => 14 * S(v) + 5 * SIP(v), { key: 'head3d', f: 1.4, z: 0.6 });
+  const pose = (u) => glassPose(u, add(k.chibiLayout([0, 0, 0], { ...WHO, headTilt: look(u) }).mouth, [0, 0, -1]));
   const G = pose(t);
   // the water's "up": gravity minus the glass's acceleration (units ≈ 2 mm, so g ≈ 4900/s²), doubled Q版-style,
   // then a spring so it lags, overshoots and rings out
@@ -136,46 +118,14 @@ export function draw(k, t = 0) {
   const up = [upXY[0], upXY[1], Math.sqrt(1 - upXY[0] ** 2 - upXY[1] ** 2)];
 
   k.group({ rotate: { z: -15 } }, () => {                                           // ¾ view, facing screen-left
-    // legs, shoes
-    for (const sd of [-1, 1]) {
-      k.cylinder([sd * 15, 0, 6], 12, 40, { fill: 'blue', r2: 13 });
-      k.sphere([sd * 15, -5, 6], 13, { fill: 'charcoal', scale: [1, 1.35, 0.55] });
-    }
-    // body
-    k.lathe([0, 0, 40], [[30, 0], [37, 18], [37, 46], [30, 72], [16, 84], [0, 86]], { fill: 'orange', smooth: true });
-    // head group (tips back about the neck)
-    k.group({ about: NECK, rotate: { x: headTilt } }, () => {
-      k.sphere(add(HEAD_C, [0, 6, 9]), HEAD_R * 1.08, { fill: 'charcoal', scale: [1.03, 1, 0.95] });     // hair cap, sits back
-      const head = k.sphere(HEAD_C, HEAD_R, { fill: 'skin' });
-      k.sphere(add(HEAD_C, [0, -4, 30]), HEAD_R * 0.9, { fill: 'charcoal', scale: [1.12, 0.98, 0.45], creases: false }); // fringe over the forehead
-      // the face is painted ON the head (decals): it turns with it and hides when it faces away
-      const onHead = (x, z) => { const y = -Math.sqrt(Math.max(0, HEAD_R ** 2 - x * x - (z - HEAD_C[2]) ** 2)); return [x, y - 0.4, z]; };
-      const disc = (c, rx, rz, n = 12) => {                                         // an ellipse in the head's tangent plane at c
-        const nn = unit(sub(c, HEAD_C)), e1 = unit(cross([0, 0, 1], nn)), e2 = cross(nn, e1);
-        return Array.from({ length: n }, (_, i) => { const a = (i / n) * TAU; return add(c, add(mul(e1, rx * Math.cos(a)), mul(e2, rz * Math.sin(a)))); });
-      };
-      const closed = G.s > 0.9;
-      for (const sd of [-1, 1]) {
-        const e = onHead(sd * 19, 165), nrm = unit(sub(e, HEAD_C));
-        if (closed) k.line([onHead(sd * 19 - 6, 166), onHead(sd * 19, 163), onHead(sd * 19 + 6, 166)], { on: head, normal: nrm, smooth: true, weight: 'detail' });
-        else k.panel(disc(e, 4.5, 5.5), { on: head, fill: 'charcoal', flat: true, ink: false });
-        k.panel(disc(onHead(sd * 30, 151), 7, 4.5), { on: head, fill: 'blush', flat: true, ink: false });
-      }
-      k.line([onHead(-6, 150), onHead(0, 147), onHead(6, 150)], { on: head, normal: [0, -1, 0], smooth: true, weight: 'detail' });
-    });
-    // left arm hangs (the far side in this view)
-    k.sphere([-38, -4, 60], 11, { fill: 'skin' });
-    k.tube([SHOULDER_L, [-38, 0, 88], [-38, -3, 66]], [10, 9], { fill: 'orange' });
+    // the glass and its water first, then the person reaching for it (the arm is cut where it meets the hand)
     let glass;
-    // the glass, its water, the hand on its outer side, then the right arm (cut where it enters body and hand)
     k.group({ about: [0, 0, 0], rotate: [[1, 0, 0], G.tilt], at: G.pos }, () => {
-      glass = k.lathe([0, 0, 0], [[GR0, 0], [GR1, GH]], { fill: 'white', wall: WALL, floor: FLOOR, inside: '#e8eef0' });
+      glass = k.lathe([0, 0, 0], [[GR0, 0], [GR1, GH]], { fill: 'white', wall: WALL, floor: FLOOR });
     });
     const m = toMesh(water(G.pos, G.tilt, up).polys);                                // already in person space
     k.mesh(m.V, m.F, { fill: 'sky', in: glass, shadow: false, creases: false });
-    const handC = add(G.pos, rotX([GR1 + 7, 0, GH * 0.45], G.tilt));
-    k.sphere(handC, 11.5, { fill: 'skin' });
-    const { E, W } = ik(SHOULDER_R, handC, UPPER, FORE, unit([0.8, 0.1, -0.6]));       // pole: out to the side and down
-    k.tube([SHOULDER_R, E, W], [10, 9], { fill: 'orange' });
+    const hand = add(G.pos, rotX([GR1 + 7, 0, GH * 0.45], G.tilt));                  // on the glass's outer side
+    k.chibi([0, 0, 0], { ...WHO, headTilt: look(t), expression: G.s > 0.9 ? 'closed' : 'neutral', reach: { right: hand } });
   });
 }

@@ -1,5 +1,5 @@
 // A ginger cat sitting on a cushion, front view. Animated: tail sways, eyes blink.
-export const sheet = { theme: 'classic', seed: 5 };
+export const sheet = { seed: 5 };
 
 export function draw(k, t = 0) {
   // cushion
