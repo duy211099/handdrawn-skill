@@ -340,6 +340,7 @@ const GLYPHS = {
   '#': [5.2, 'L 1.6 -7 1 0;L 3.8 -7 3.2 0;L 0.2 -4.8 4.8 -4.8;L 0 -2.2 4.6 -2.2'],
   '°': [2.4, 'O 1.1 -6.2 0.9 0.9 0 365'],
   '·': [1.6, 'D 0.5 -2.6'],
+  '。': [2.6, 'O 1.1 -0.9 0.9 0.9 0 365'],
   '→': [6.8, 'L 0 -2.6 6.2 -2.6;L 4.6 -4 6.2 -2.6 4.6 -1.2'],
   '←': [6.8, 'L 6.2 -2.6 0 -2.6;L 1.6 -4 0 -2.6 1.6 -1.2'],
   '↑': [4, 'L 2 0 2 -7;L 0.6 -5.4 2 -7 3.4 -5.4'],
@@ -363,6 +364,8 @@ const MARKS = {
   0x0306: { pos: 'above', h: 1.3, d: 'C -1.3 -1.3 -0.7 -0.2 0 0 0.7 -0.2 1.3 -1.3', dx: 0 }, // breve  ă
   0x0308: { pos: 'above', h: 0.6, d: 'D -0.9 -0.3;D 0.9 -0.3', dx: 0 },          // diaeresis
   0x031B: { pos: 'horn' },                                                       // horn  ơ ư
+  0x0304: { pos: 'above', h: 0.5, d: 'L -1.3 -0.3 1.3 -0.3', dx: 0 },            // macron  pinyin tone 1  ā
+  0x030C: { pos: 'above', h: 1.5, d: 'L -1.2 -1.5 0 0 1.2 -1.5', dx: 0 },        // caron   pinyin tone 3  ǎ
 };
 const HORN_D = 'C 0 0 0.9 -0.3 1.2 -1.1 0.9 -1.8';
 
@@ -392,6 +395,76 @@ function glyph(ch) {
   return (GLYPH_CACHE[ch] = { w: g[0], strokes: parseStrokes(g[1]) });
 }
 
+/* ------------------------------------------------------------------ hanzi (Chinese characters) */
+// Stroke centrelines in stroke order (Make Me a Hanzi, Arphic PL; see hanzi/README.md). render.mjs loads the data
+// and calls registerHanzi(). A character sits in a 10×10-unit em box from y=−8.4 to +1.6 (cap height is −7).
+const HAN_EM = 10;
+let HANZI = null;
+let HANZI_CACHE = {};
+export function registerHanzi(data) { HANZI = data; HANZI_CACHE = {}; }
+const isHan = (ch) => /\p{Script=Han}/u.test(ch);
+function hanziGlyph(ch) {
+  if (HANZI_CACHE[ch] !== undefined) return HANZI_CACHE[ch];
+  const def = HANZI && HANZI[ch];
+  if (!def) return (HANZI_CACHE[ch] = null);
+  // data: 512 grid, y up, top of box at 450 → units
+  const strokes = def.split('|').map((s) => ({
+    kind: 'L',
+    pts: s.split(' ').map((p) => { const [x, y] = p.split(',').map(Number); return [(x / 51.2), ((450 - y) / 51.2) - 8.4]; }),
+  }));
+  return (HANZI_CACHE[ch] = { w: HAN_EM, strokes, han: true });
+}
+// full-width CJK punctuation → existing glyphs (drawn in a full em)
+const CJK_PUNCT = { '，': ',', '。': '。', '、': ',', '！': '!', '？': '?', '：': ':', '；': ';', '（': '(', '）': ')' };
+function anyGlyph(ch) {
+  if (isHan(ch)) return hanziGlyph(ch);
+  if (CJK_PUNCT[ch]) { const g = glyph(CJK_PUNCT[ch]); return g && { w: HAN_EM * 0.6, strokes: g.strokes }; }
+  return glyph(ch);
+}
+
+/* ------------------------------------------------------------------ pinyin */
+const TONE_MARK = { 0x0304: 1, 0x0301: 2, 0x030C: 3, 0x0300: 4 };
+const TONE_COMB = { 1: '\u0304', 2: '\u0301', 3: '\u030C', 4: '\u0300' };
+/** 'cha2' → 'chá', 'lv4' → 'lǜ', 'ma5'/'ma' → 'ma'. Marked pinyin passes through. */
+function markSyllable(s) {
+  const m = /^([a-züv:]+)([1-5])$/i.exec(s);
+  if (!m) return s;
+  let body = m[1].replace(/v|u:/gi, (x) => (x[0] === 'V' || x[0] === 'U' ? 'Ü' : 'ü'));
+  const tone = +m[2];
+  if (tone === 5) return body;
+  const low = body.toLowerCase();
+  let at = low.search(/[ae]/);
+  if (at < 0) at = low.indexOf('ou');
+  if (at < 0) { for (let i = low.length - 1; i >= 0; i--) if ('iouü'.includes(low[i])) { at = i; break; } }
+  if (at < 0) return body;
+  return (body.slice(0, at + 1) + TONE_COMB[tone] + body.slice(at + 1)).normalize('NFC');
+}
+/** Split pinyin into syllables (spaces, apostrophes, or numbered "dian4hua4"), each with its tone 1–5. */
+const PY_SYL = /(?:zh|ch|sh|[bpmfdtnlgkhjqxrzcsyw])?(?:iang|iong|uang|ueng|iao|ian|uai|uan|üan|ang|eng|ing|ong|ai|ei|ao|ou|an|en|in|un|ün|ia|ie|iu|ua|uo|ui|üe|ue|er|a|o|e|i|u|ü)(?![aeiouü])|(?:zh|ch|sh|[bpmfdtnlgkhjqxrzcsyw])?(?:ia|ua|uo|a|o|e|i|u|ü)/gi;
+/** 'diànhuà' → ['diàn', 'huà'] (marks kept); falls back to the word unchanged. */
+function splitJoined(w) {
+  const chars = [...w.normalize('NFC')];
+  const base = chars.map((c) => c.normalize('NFD').replace(/[\u0300\u0301\u0304\u030C]/g, '').normalize('NFC')).join('');
+  if (base.length !== chars.length) return [w];
+  const out = [];
+  let m, end = 0;
+  PY_SYL.lastIndex = 0;
+  while ((m = PY_SYL.exec(base))) { if (m.index !== end) return [w]; out.push(chars.slice(m.index, m.index + m[0].length).join('')); end = m.index + m[0].length; }
+  return end === base.length && out.length ? out : [w];
+}
+function pinyinSyllables(str, want) {
+  let raw = String(str).trim().split(/[\s'’]+/).flatMap((w) => w.match(/[^\d]+[1-5]|[^\d]+$/g) || [w]);
+  if (want && raw.length !== want) { const alt = raw.flatMap((w) => (/\d$/.test(w) ? [w] : splitJoined(w))); if (alt.length === want) raw = alt; }
+  return raw.filter(Boolean).map((s) => {
+    const text = markSyllable(s);
+    let tone = 5;
+    for (const c of text.normalize('NFD')) if (TONE_MARK[c.codePointAt(0)]) tone = TONE_MARK[c.codePointAt(0)];
+    return { text, tone };
+  });
+}
+// Pleco-style tone colours, deep enough to read as ink
+const TONE_INK = { 1: '#b8473b', 2: '#c27a2c', 3: '#4d8a46', 4: '#3f64a8', 5: '#6d665f' };
+
 /* ------------------------------------------------------------------ the kit */
 
 const WEIGHTS = { outline: 2.3, detail: 1.6, fine: 1.1, hatch: 0.9, bold: 3.2 };
@@ -410,9 +483,16 @@ export function createKit(opts = {}) {
   let M = [1, 0, 0, 1, 0, 0]; // affine: x' = a x + c y + e, y' = b x + d y + f
   let groupScale = 1;
 
+  let fixedSeed = null; // set by steady(): same wobble in every frame
   function rng() {
     counters[scope] = (counters[scope] || 0) + 1;
-    return mulberry32(hashStr(seed + '|' + scope + '|' + counters[scope]));
+    return mulberry32(hashStr((fixedSeed == null ? seed : fixedSeed) + '|' + scope + '|' + counters[scope]));
+  }
+  /** Draw fn's ink identically in every animation frame (no line boil), e.g. text that must stay easy to read. */
+  function steady(fn) {
+    const ps = scope, pf = fixedSeed;
+    scope = 'steady'; fixedSeed = 'steady';
+    try { return fn(); } finally { scope = ps; fixedSeed = pf; }
   }
   // composition randomness (shape irregularity) must NOT change with the seed, or "different seed ⇒ same composition" breaks
   // keep it tied to call identity only
@@ -753,7 +833,7 @@ export function createKit(opts = {}) {
     for (const ch of str.normalize('NFD')) {
       const cp = ch.codePointAt(0);
       if (MARKS[cp]) continue;
-      const g = glyph(ch) || glyph('?');
+      const g = anyGlyph(ch) || glyph('?');
       w += (g.w + tr) * u;
     }
     return Math.max(0, w - tr * u);
@@ -776,7 +856,7 @@ export function createKit(opts = {}) {
       const chars = [...line.normalize('NFD')];
       for (let i = 0; i < chars.length; i++) {
         const ch = chars[i];
-        let g = glyph(ch);
+        let g = anyGlyph(ch);
         const marks = [];
         while (i + 1 < chars.length && MARKS[chars[i + 1].codePointAt(0)]) marks.push(chars[++i].codePointAt(0));
         if (!g) g = glyph('?');
@@ -804,7 +884,7 @@ export function createKit(opts = {}) {
           }
           const gap = upper ? 0.9 : 1.1;
           const baseY = top - gap;
-          const dx = stacked ? mk.dx + 0.6 : 0;
+          const dx = stacked && marks[0] !== 0x0308 ? mk.dx + 0.6 : 0;
           strokes.push(...parseStrokes(mk.d).map((s) => ({ kind: s.kind, pts: s.pts.map((p) => [p[0] + mx + dx, p[1] + baseY]) })));
           top = baseY - mk.h + 0.2;
           stacked++;
@@ -852,6 +932,111 @@ export function createKit(opts = {}) {
       body.push(`<path d="${blobPath(tx(T), 2.6, r)}" fill="${PALETTE.ink}"/>`);
     }
     return b;
+  }
+
+  /* -------------------- Chinese: big characters + vocab card */
+
+  function cutPoly(P, frac) {
+    const L = polyLen(P) * frac;
+    const out = [P[0]];
+    let acc = 0;
+    for (let i = 1; i < P.length; i++) {
+      const d = dist(P[i - 1], P[i]);
+      if (acc + d >= L) { const f = d ? (L - acc) / d : 0; out.push([lerp(P[i - 1][0], P[i][0], f), lerp(P[i - 1][1], P[i][1], f)]); return out; }
+      acc += d; out.push(P[i]);
+    }
+    return out;
+  }
+  function inkLine(pts, w, color, o = {}) {
+    body.push(`<path d="${inkPoly(txAll(pts), w, rng(), { overshoot: 0.2, wobble: o.wobble == null ? 0.4 : o.wobble, stiff: 1.6 })}" fill="${color}"/>`);
+  }
+  /** 田字格 practice box: light red frame + dashed centre cross (+ diagonals for 米字格). */
+  function tianzige(x, y, s, o = {}) {
+    const c = o.color || '#d99a8c';
+    inkLine([[x, y], [x + s, y], [x + s, y + s], [x, y + s], [x, y - 1]], 1.3, c, { wobble: 0.6 });
+    const dash = (a, b) => {
+      const L = dist(a, b), n = Math.max(3, Math.round(L / 14));
+      for (let i = 0; i < n; i += 2) {
+        const f0 = i / n, f1 = Math.min(1, (i + 1) / n);
+        inkLine([[lerp(a[0], b[0], f0), lerp(a[1], b[1], f0)], [lerp(a[0], b[0], f1), lerp(a[1], b[1], f1)]], 0.8, c, { wobble: 0.2 });
+      }
+    };
+    dash([x + s / 2, y + 4], [x + s / 2, y + s - 4]);
+    dash([x + 4, y + s / 2], [x + s - 4, y + s / 2]);
+    if (o.diagonals) { dash([x + 5, y + 5], [x + s - 5, y + s - 5]); dash([x + s - 5, y + 5], [x + 5, y + s - 5]); }
+  }
+
+  /**
+   * Chinese characters, large, in hand-inked strokes. With animation, they write themselves in correct stroke
+   * order: finished for the first `hold` of the loop (so stills / frame 0 show the whole word), then rewritten.
+   * x,y = top-left of the first box (align:'center' → x is the centre). Returns boxes for placing pinyin etc.
+   */
+  function hanzi(str, o = {}) {
+    const chars = [...String(str)].filter((c) => !/\s/.test(c));
+    const size = o.size || 160, u = size / HAN_EM;
+    const gap = o.gap == null ? size * 0.14 : o.gap;
+    const totalW = chars.length * size + (chars.length - 1) * gap;
+    const x0 = o.align === 'center' ? o.x - totalW / 2 : o.x, y0 = o.y;
+    const w = weightOf(o.weight || Math.max(1.6, size * 0.042));
+    const glyphs = chars.map((c) => hanziGlyph(c));
+    const N = glyphs.reduce((a, g) => a + (g ? g.strokes.length : 0), 0);
+    const hold = o.hold == null ? 0.3 : o.hold;
+    const tt = o.t == null ? t : o.t;
+    const animated = o.order === true && tt > 0;
+    const prog = !animated || tt < hold ? N : clamp((tt - hold) / (1 - hold) / 0.92, 0, 1) * N;
+    const boxes = [];
+    let k = 0;
+    glyphs.forEach((g, i) => {
+      const bx = x0 + i * (size + gap), by = y0;
+      boxes.push({ x: bx, y: by, w: size, h: size, cx: bx + size / 2, cy: by + size / 2, ch: chars[i] });
+      if (o.grid !== false) tianzige(bx, by, size, { diagonals: o.grid === 'mi' });
+      const color = inkColor(o.inks ? o.inks[i] : o.ink);
+      if (!g) { text('?', bx + size * 0.32, by + size * 0.75, { size: size * 0.7 }); return; }
+      const place = (p) => [bx + p[0] * u, by + (p[1] + 8.4) * u];
+      for (const s of g.strokes) {
+        const P = s.pts.map(place);
+        const f = clamp(prog - k, 0, 1);
+        k++;
+        if (f >= 1) { body.push(`<path d="${inkPoly(txAll(P), w, rng(), { overshoot: 0.15, wobble: 0.3, stiff: 2.4, pressure: 1 })}" fill="${color}"/>`); continue; }
+        // not yet written: faint tracing guide
+        if (o.ghost !== false) inkLine(P, Math.max(1, w * 0.3), PALETTE.stone, { wobble: 0.2 });
+        if (f > 0.02) body.push(`<path d="${inkPoly(txAll(cutPoly(P, f)), w, rng(), { overshoot: 0, wobble: 0.3, stiff: 2.4, pressure: 1 })}" fill="${color}"/>`);
+      }
+    });
+    return { x: x0, y: y0, w: totalW, h: size, boxes, strokes: N };
+  }
+
+  /**
+   * Vocab card for Vietnamese learners: characters (tone-coloured, stroke order) with, under each one, its pinyin
+   * and Hán-Việt reading, then the Vietnamese meaning and an optional note (e.g. a false-friend warning).
+   *   k.word({ hanzi: '电话', pinyin: 'diàn huà', hanviet: 'điện thoại', meaning: 'điện thoại', x: 500, y: 200, align: 'center' })
+   * pinyin may be numbered ('dian4 hua4'). tone colours: 1 red, 2 orange, 3 green, 4 blue, neutral grey.
+   */
+  function word(o = {}) {
+    if (!o.boil) return steady(() => word({ ...o, boil: true }));
+    const size = o.size || 150;
+    const chars = [...String(o.hanzi)].filter((c) => !/\s/.test(c));
+    const syl = o.pinyin ? pinyinSyllables(o.pinyin, chars.length) : [];
+    const perChar = syl.length === chars.length;
+    const tones = o.toneColors !== false && perChar ? syl.map((s) => TONE_INK[s.tone]) : null;
+    const hb = hanzi(o.hanzi, { x: o.x, y: o.y, size, align: o.align, inks: tones, ink: o.ink, grid: o.grid == null ? false : o.grid, t: o.t, hold: o.hold, order: o.order, ghost: o.ghost });
+    const hv = o.hanviet ? String(o.hanviet).trim().split(/\s+/) : [];
+    const ps = Math.max(18, size * 0.24), hs = Math.max(15, size * 0.15), ms = o.meaningSize || Math.max(20, size * 0.2);
+    let y = o.y + size + ps * 1.25;
+    const cx = hb.x + hb.w / 2;
+    if (syl.length) {
+      if (perChar) hb.boxes.forEach((b, i) => text(syl[i].text, b.cx, y, { size: ps, align: 'center', ink: tones ? tones[i] : undefined }));
+      else text(syl.map((s) => s.text).join(' '), cx, y, { size: ps, align: 'center' });
+      y += ps * 0.3;
+    }
+    if (hv.length) {
+      y += hs * 1.35;
+      if (hv.length === chars.length) hb.boxes.forEach((b, i) => text(hv[i].toUpperCase(), b.cx, y, { size: hs, align: 'center', tracking: 1.1, ink: 'charcoal' }));
+      else text(hv.join(' ').toUpperCase(), cx, y, { size: hs, align: 'center', tracking: 1.1, ink: 'charcoal' });
+    }
+    if (o.meaning) { y += ms * 1.9; text(o.meaning, cx, y, { size: ms, align: 'center' }); }
+    if (o.note) { y += ms * 1.55; text(o.note, cx, y, { size: ms * 0.75, align: 'center', ink: 'brick' }); }
+    return { x: hb.x, y: o.y, w: hb.w, h: y - o.y + ms * 0.4, boxes: hb.boxes, bottom: y + ms * 0.4 };
   }
 
   /* -------------------- groups */
@@ -978,7 +1163,7 @@ export function createKit(opts = {}) {
       return s;
     },
 
-    text, textWidth, title, label,
+    text, textWidth, title, label, hanzi, word, tianzige, steady,
 
     /** Raw pieces, for combining frames (see svgDocument). */
     parts() { return { defs: defs.slice(), body: body.slice() }; },

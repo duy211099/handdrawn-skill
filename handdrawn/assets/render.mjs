@@ -8,12 +8,15 @@
 // A scene file:  export function draw(k, t) { ... }      (t in [0,1) for animation; ignore it for stills)
 //                export const sheet = { width: 1000, height: 1000, seed: 3, transparent: false }  (all optional)
 // The SVG is built as a string (no DOM). PNG/GIF rasterising uses @resvg/resvg-js (optional dependency).
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve, basename, extname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createKit, svgDocument } from './kit.js';
+import { createKit, svgDocument, registerHanzi } from './kit.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Chinese characters (stroke-order data, ~5 MB): loaded once if present
+const hanziFile = join(here, 'hanzi', 'medians.json');
+if (existsSync(hanziFile)) registerHanzi(JSON.parse(readFileSync(hanziFile, 'utf8')));
 
 function parseArgs(argv) {
   const a = { _: [] };
