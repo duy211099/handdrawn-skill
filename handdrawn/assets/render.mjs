@@ -58,7 +58,7 @@ const animate = !(args.still || sheet.still) || !!args.animate;
 const out = args.out || join(dirname(scenePath), basename(scenePath, extname(scenePath)) + '.svg');
 
 function frameParts(t, frameSeed, idPrefix) {
-  const k = createKit({ width: W, height: H, seed: frameSeed, transparent, t, idPrefix });
+  const k = createKit({ width: W, height: H, seed: frameSeed, transparent, t, duration: sheet.duration || nFrames / fps, idPrefix });
   scene.draw(k, t);
   return k.parts();
 }
@@ -179,7 +179,7 @@ async function renderVocab(v) {
     const px = 250, box = [Infinity, Infinity, -Infinity, -Infinity];
     const ts = kind === 'concrete' ? [T0] : [T0, 0.25, 0.5, 0.75, 0.99];
     for (const t of ts) {
-      const k = createKit({ width: W, height: H, seed, transparent: true, t });
+      const k = createKit({ width: W, height: H, seed, transparent: true, t, duration: sheet.duration || 2.4 });
       scene.draw(k, t);
       const img = await rasterize(svgDocument([k.parts()], { W, H, seed, transparent: true }), px);
       const { pixels, width: iw, height: ih } = img;
@@ -202,7 +202,7 @@ async function renderVocab(v) {
   // colour check: prefer the theme's palette, warn about others, and about more than 4 colours
   const allowed = themeInfo().allowed;
   if (allowed) {
-    const k = createKit({ width: W, height: H, seed, transparent, t: 0 });
+    const k = createKit({ width: W, height: H, seed, transparent, t: 0, duration: sheet.duration || 2.4 });
     scene.draw(k, T0);
     const used = k.fillsUsed().map((c) => c.toUpperCase()).filter((c) => c !== '#E3D8C4'); // not the shadow
     const off = used.filter((c) => !allowed.includes(c));
@@ -214,7 +214,7 @@ async function renderVocab(v) {
   const frame = (f, t, idPrefix) => {
     const body = [], defs = [];
     if (f.picture) {
-      const k = createKit({ width: W, height: H, seed, transparent, t, idPrefix }); // no boil: same seed every frame
+      const k = createKit({ width: W, height: H, seed, transparent, t, duration: sheet.duration || 2.4, idPrefix }); // no boil: same seed every frame
       drawPicture(k, t);
       const p = k.parts();
       defs.push(...p.defs);
@@ -224,7 +224,7 @@ async function renderVocab(v) {
       } else body.push(...p.body);
     }
     if (f.card) {
-      const k = createKit({ width: W, height: H, seed, transparent, t, idPrefix: idPrefix + 'c' });
+      const k = createKit({ width: W, height: H, seed, transparent, t, duration: sheet.duration || 2.4, idPrefix: idPrefix + 'c' });
       f.card(k);
       const p = k.parts();
       defs.push(...p.defs); body.push(...p.body);

@@ -77,6 +77,56 @@ function motion(t, beats) {
   }
   return beats[beats.length - 1][0];
 }
+
+/* -------------------- secondary motion: second-order dynamics (t3ssel8r, "Giving Personality to Procedural
+ * Animations using Math"). y chases a driving signal x like a mass on a spring:
+ *   f = natural frequency in Hz (how quickly it responds), z = damping (0 rings forever, 0.3–0.7 alive, 1 no
+ *   overshoot), r = initial response (0 eases in, 1 reacts at once, >1 overshoots the start, <0 anticipates).
+ * Keyframe only the primary motion; derive everything attached to it (a head that follows the hand, liquid that
+ * sloshes, a lid that rattles, a leaf that sways) with follow(), and the cause→effect lag makes it read as physical.
+ * Frames are drawn independently, so the simulation is run once per signal and cached: the driver is sampled over
+ * one loop, the system runs for `warm` loops (a damped system driven by a looping signal settles into a looping
+ * response), and the last loop is kept, so the result joins up seamlessly. */
+function secondOrderLoop(xs, dt, f, z, r, warm) {
+  const k1 = z / (Math.PI * f), k2 = 1 / ((2 * Math.PI * f) ** 2), k3 = (r * z) / (2 * Math.PI * f);
+  const n = xs.length, dim = xs[0].length, sub = 4, h = dt / sub;
+  const k2s = Math.max(k2, (h * h) / 2 + (h * k1) / 2, h * k1);       // keeps a stiff spring stable at this step
+  const y = xs[0].slice(), yd = new Array(dim).fill(0), out = [];
+  for (let loop = 0; loop <= warm; loop++)
+    for (let i = 0; i < n; i++) {
+      const x = xs[i], xp = xs[(i - 1 + n) % n];
+      for (let d = 0; d < dim; d++) {
+        const xd = (x[d] - xp[d]) / dt;
+        for (let s = 0; s < sub; s++) {                                   // semi-implicit Euler
+          y[d] += h * yd[d];
+          yd[d] += (h * (x[d] + k3 * xd - y[d] - k1 * yd[d])) / k2s;
+        }
+      }
+      if (loop === warm) out.push(y.slice());
+    }
+  return out;
+}
+const FOLLOW_CACHE = new Map();
+function follow(t, src, o = {}, duration = 2.4) {
+  const n = o.samples || 240, f = o.f == null ? 2 : o.f, z = o.z == null ? 0.5 : o.z, r = o.r || 0, warm = o.warm || 3;
+  const raw = (u) => src(u), probe = [0, 0.13, 0.29, 0.41, 0.58, 0.71, 0.86].map(raw);
+  const key = `${o.key || src}|${n},${f},${z},${r},${warm},${duration}|${JSON.stringify(probe)}`;   // probes catch closures over different values
+  let table = FOLLOW_CACHE.get(key);
+  if (!table) {
+    const xs = Array.from({ length: n }, (_, i) => [].concat(raw(i / n)));
+    table = secondOrderLoop(xs, duration / n, f, z, r, warm);
+    if (FOLLOW_CACHE.size > 200) FOLLOW_CACHE.clear();
+    FOLLOW_CACHE.set(key, table);
+  }
+  const u = (((t % 1) + 1) % 1) * n, i = Math.floor(u), a = table[i % n], b = table[(i + 1) % n], w = u - i;
+  const v = a.map((ai, d) => ai + (b[d] - ai) * w);
+  return Array.isArray(probe[0]) ? v : v[0];
+}
+/* Acceleration of a looping path p(u) (u = share of the loop, p returns [x, y]), in px/s², by central difference. */
+function accelOf(p, u, duration = 2.4, du = 1 / 480) {
+  const a = p(u - du), b = p(u), c = p(u + du), dt2 = (du * duration) ** 2;
+  return [(a[0] - 2 * b[0] + c[0]) / dt2, (a[1] - 2 * b[1] + c[1]) / dt2];
+}
 const fmt = (n) => { const r = Math.round(n * 10) / 10; return (r === 0 ? 0 : r).toString(); };
 const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
 
@@ -585,6 +635,7 @@ export function createKit(opts = {}) {
   const W = opts.width || 1000, H = opts.height || 1000;
   const seed = opts.seed == null ? 1 : opts.seed;
   const t = opts.t || 0;
+  const duration = opts.duration || 2.4;   // seconds per loop (for follow(): real-time springs)
 
   const body = [];
   const defs = [];
@@ -1210,7 +1261,8 @@ export function createKit(opts = {}) {
 
   const k = {
     W, H, width: W, height: H, cx: W / 2, cy: H / 2, t, seed,
-    palette: PALETTE, weights: WEIGHTS, ease: EASE, motion: (t, beats) => motion(t, beats), spring: springCurve,
+    palette: PALETTE, weights: WEIGHTS, ease: EASE, motion: (t, beats) => motion(t, beats), spring: springCurve, duration,
+    follow: (t, src, o) => follow(t, src, o, duration), accel: (p, u) => accelOf(p, u, duration),
     soften, darker, lighter,
     geo,
     draw, fill, ink, shade, hatch,
@@ -1709,13 +1761,21 @@ function installPieces(k, I) {
     const head = clamp(o.head || 0.45, 0.28, 0.55), headH = head * 100, rH = headH / 2;   // 0.4–0.5 = 二头半身 … 二头身
     const hy = -(100 - rH), body = 100 - headH, legH = body * 0.4, tB = -legH, tT = -(100 - headH) - 4;
     const sw = rH * 0.5, hw = rH * 0.66, armW = rH * 0.34, armL = (tB - tT) * 0.9;
-    const shoulder = (side) => [side * hw * 0.86, tT + (tB - tT) * 0.2];   // at the edge of the body, like a real shoulder
-    return { head, rH, hy, legH, tB, tT, sw, hw, armW, armL, shoulder,
-      mouth: [0, hy + rH * 0.56], eyes: [[-rH * 0.4, hy + rH * 0.2], [rH * 0.4, hy + rH * 0.2]] };   // Q版: features sit in the lower half of the face
+    // turn: 0 front, -1 / 1 three-quarter view facing the viewer's left / right. The face features slide toward the
+    // facing side, the far eye narrows, the far shoulder tucks in behind the body.
+    const f = Math.sign(o.turn || 0), dx = f * rH * 0.34;
+    const shoulder = (side) => (f && side === f ? [f * hw * 0.55, tT + (tB - tT) * 0.22] : [side * hw * (f ? 0.92 : 0.86), tT + (tB - tT) * 0.2]);   // at the edge of the body
+    const eyes = f ? [[dx - f * rH * 0.34, hy + rH * 0.2], [dx + f * rH * 0.28, hy + rH * 0.2]] : [[-rH * 0.4, hy + rH * 0.2], [rH * 0.4, hy + rH * 0.2]];
+    const mouth = [dx + f * rH * 0.06, hy + rH * 0.56];                               // Q版: features sit in the lower half of the face
+    // headTilt (degrees, + = clockwise on screen) turns the head about the neck: tip it back to drink, down to read
+    const neck = [0, tT + 1], ta = ((o.headTilt || 0) * Math.PI) / 180;
+    const tilt = (p) => [neck[0] + (p[0] - neck[0]) * Math.cos(ta) - (p[1] - neck[1]) * Math.sin(ta), neck[1] + (p[0] - neck[0]) * Math.sin(ta) + (p[1] - neck[1]) * Math.cos(ta)];
+    return { head, rH, hy, legH, tB, tT, sw, hw, armW, armL, shoulder, f, dx, neck, ta, tilt,
+      mouth, mouthT: tilt(mouth), headT: tilt([0, hy]), eyes };
   };
   k.chibiLayout = (x, groundY, o = {}) => {
     const G = chibiGeom(o), s = (o.h || 400) / 100, S = (p) => [x + p[0] * s, groundY + p[1] * s];
-    return { unit: s, head: S([0, G.hy]), top: S([0, G.hy - G.rH]), mouth: S(G.mouth), shoulderR: S(G.shoulder(1)),
+    return { unit: s, head: S(G.headT), top: S(G.tilt([0, G.hy - G.rH])), mouth: S(G.mouthT), shoulderR: S(G.shoulder(1)),
       shoulderL: S(G.shoulder(-1)), armLength: G.armL * s, armWidth: G.armW * s, feet: [x, groundY] };
   };
   k.chibi = (x, groundY, o = {}) => {
@@ -1732,10 +1792,13 @@ function installPieces(k, I) {
     function chibiDraw() { return group({ x, y: groundY, scale: s }, () => scoped('chibi', () => {
       if (o.shadow !== false) k.shadow(0, 0, hw * 1.3, 3.2, { lines: 2 });
       // legs + shoes
-      for (const sd of [-1, 1]) {
-        k.tube([[sd * hw * 0.4, tB - 3], [sd * hw * 0.44, -4]], [hw * 0.56, hw * 0.5], { fill: pants, weight: OW, cap: 'flat' });
-        k.ellipse(sd * hw * 0.5, -2.8, hw * 0.42, 3.3, { fill: shoes, weight: OW });
-        if (rich) k.line(sd * hw * 0.5 - hw * 0.36, -1.4, sd * hw * 0.5 + hw * 0.36, -1.4, { weight: 'fine' });   // sole
+      const F = G.f;
+      for (const sd of F ? [F, -F] : [-1, 1]) {   // far leg first
+        const lx = sd * hw * (F && sd === F ? 0.3 : 0.42);
+        k.tube([[lx, tB - 3], [lx + F * hw * 0.04, -4]], [hw * 0.56, hw * 0.5], { fill: pants, weight: OW, cap: 'flat' });
+        const fx = lx + F * hw * 0.16 + (F ? 0 : sd * hw * 0.08);   // feet point toward the facing side
+        k.ellipse(fx, -2.8, hw * 0.42, 3.3, { fill: shoes, weight: OW });
+        if (rich) k.line(fx - hw * 0.36, -1.4, fx + hw * 0.36, -1.4, { weight: 'fine' });   // sole
       }
       // arms: hanging ones go behind the body, raised / reaching ones in front
       const mitten = (p, sd) => {
@@ -1749,40 +1812,30 @@ function installPieces(k, I) {
         mitten([W[0], W[1] + armW * 0.35], sd);
         out[sd > 0 ? 'handR' : 'handL'] = k.toSheet(W[0], W[1] + armW * 0.35);
       };
-      // two-bone arm with skeleton rules: fixed bone lengths; the elbow can't fold shut (≥ ~40° open); and when the
-      // hand's direction is known (`rightElbowDir` / `leftElbowDir`: from the wrist toward the elbow, i.e. the way the
-      // back of the hand points), the forearm must continue it, so the wrist only bends a little. That picks the elbow:
-      // tip a glass up to drink and the elbow rises, as it does for real.
-      const ik = (sd, Tsheet, dirSheet) => {
+      // two-bone arm, solved in 3D and projected (how rigs do it: Juckett's analytic two-bone IK + a pole vector).
+      // Bones keep their 3D length: when the hand comes close to the shoulder on screen, it is in front of the body,
+      // toward the viewer, so the arm reads foreshortened instead of folding shut or flipping. The elbow sits on the
+      // side of a fixed pole (default: out to the side and a little down), so it never jumps between the two
+      // mirror-image solutions mid-move. `rightPole` / `leftPole`: [x, y] or [x, y, z] direction (z = toward the
+      // viewer), in the person's frame: +x = the arm's own side.
+      const ik = (sd, Tsheet, poleIn) => {
         const S = G.shoulder(sd), T = toLocal(Tsheet), a = armL * 0.52, b = armL * 0.5;
-        let dx = T[0] - S[0], dy = T[1] - S[1], d = Math.hypot(dx, dy);
-        const minReach = Math.sqrt(a * a + b * b - 2 * a * b * Math.cos((40 * Math.PI) / 180));   // elbow ≥ 40° open
-        const dd = clamp(d, minReach, a + b - 0.3);
-        const base = Math.atan2(dy, dx), al = Math.acos(clamp((a * a + dd * dd - b * b) / (2 * a * dd), -1, 1));
-        const cand = [base + al, base - al].map((t) => [S[0] + Math.cos(t) * a, S[1] + Math.sin(t) * a]);
-        // the elbow can't be inside the body: it must sit outside the torso's edge at its height
-        const inside = (p) => p[1] > tT && p[1] < tB + 2 && Math.abs(p[0]) < hw * 0.8;   // an arm at the side may overlap the body's edge, not sink into it
-        let E;
-        if (dirSheet) {
-          const dl = Math.hypot(dirSheet[0], dirSheet[1]) || 1, u = [dirSheet[0] / dl, dirSheet[1] / dl];   // scale-free: same direction locally
-          const score = (p) => { const v = [p[0] - T[0], p[1] - T[1]], vl = Math.hypot(v[0], v[1]) || 1; return (v[0] * u[0] + v[1] * u[1]) / vl; };
-          E = cand.sort((p, q) => score(q) - score(p))[0];   // the forearm that best continues the hand
-        } else E = cand.sort((p, q) => (q[1] + q[0] * sd * 0.35) - (p[1] + p[0] * sd * 0.35))[0];  // relaxed: elbow down and a little out
-        if (inside(E)) {
-          const other = cand.find((p) => p !== E);
-          if (other && !inside(other)) E = other;
-          else E = [sd * hw * 0.85, E[1]];   // last resort: keep the elbow at the body's edge (the forearm takes the slack)
-        }
-        // relaxed hold (no direction, or the hand's back faces down): the upper arm hangs by the side and the forearm
-        // points toward the viewer, so it looks shorter (foreshortened). A real arm holding something at the chest.
-        const relaxed = !dirSheet || dirSheet[1] / (Math.hypot(dirSheet[0], dirSheet[1]) || 1) > 0.75;
-        const Eh = [S[0] + sd * armW * 0.25, S[1] + a * 0.96];
-        if (relaxed && Math.hypot(T[0] - Eh[0], T[1] - Eh[1]) <= b * 1.02) E = Eh;
-        const W = [S[0] + (dx / d) * Math.min(d, a + b - 0.3), S[1] + (dy / d) * Math.min(d, a + b - 0.3)];
-        const Wr = d > a + b - 0.3 && E !== Eh ? W : T;
+        const dx = T[0] - S[0], dy = T[1] - S[1], d2 = Math.hypot(dx, dy);
+        const R = Math.max(d2, (a + b) * 0.86);                          // comfortable 3D reach: the rest goes into depth
+        const dz = Math.sqrt(Math.max(0, R * R - d2 * d2));              // + = toward the viewer
+        const dist = Math.min(Math.hypot(dx, dy, dz), a + b - 0.3), n = [dx, dy, dz].map((v) => v / (Math.hypot(dx, dy, dz) || 1));
+        const pl = poleIn || [1, 0.45, -0.15], pv = [sd * pl[0], pl[1], pl[2] || 0];
+        const pn = pv[0] * n[0] + pv[1] * n[1] + pv[2] * n[2];
+        let q = [pv[0] - pn * n[0], pv[1] - pn * n[1], pv[2] - pn * n[2]];   // the pole, square to shoulder→hand
+        const ql = Math.hypot(...q) || 1; q = q.map((v) => v / ql);
+        const ca = clamp((a * a + dist * dist - b * b) / (2 * a * dist), -1, 1), sa = Math.sqrt(1 - ca * ca);
+        const E3 = [0, 1, 2].map((i) => a * (ca * n[i] + sa * q[i]));      // elbow, relative to the shoulder
+        const E = [S[0] + E3[0], S[1] + E3[1]];
+        const Wr = [S[0] + n[0] * dist, S[1] + n[1] * dist];              // = T unless out of reach
         k.tube([S, E, Wr], [armW, armW * 0.84], { fill: shirt, weight: OW });
-        k.arc(E[0], E[1], armW * 0.32, armW * 0.18, 200, 340, { weight: 'fine' });            // a fold at the elbow
+        if (Math.hypot(E3[0], E3[1]) > a * 0.6) k.arc(E[0], E[1], armW * 0.32, armW * 0.18, 200, 340, { weight: 'fine' });   // a fold at the elbow (not when it points at the viewer)
         out[sd > 0 ? 'wristR' : 'wristL'] = k.toSheet(...Wr);
+        out[sd > 0 ? 'elbowR' : 'elbowL'] = k.toSheet(...E);
       };
       const front = [];
       for (const sd of [1, -1]) {
@@ -1794,24 +1847,29 @@ function installPieces(k, I) {
           k.hand(W[0], W[1], { size: armW * 1.25, angle: o.wave, fill: skin, weight: 'outline' });
           out.handR = k.toSheet(...W);
         });
-        else if (o.reach && o.reach[key]) front.push(() => ik(sd, o.reach[key], o.reach[key + 'ElbowDir']));
+        else if (o.reach && o.reach[key]) front.push(() => ik(sd, o.reach[key], o[key + 'Pole'] || o.reach[key + 'Pole']));
         else hang(sd);
       }
       // body: a bean, wider at the hips; a round collar under the chin
       draw(geo.spline([[-G.sw, tT + 2], [-hw * 1.04, tT + (tB - tT) * 0.6], [-hw * 0.9, tB + 0.5], [0, tB + 1.5], [hw * 0.9, tB + 0.5], [hw * 1.04, tT + (tB - tT) * 0.6], [G.sw, tT + 2], [0, tT - 1.5]], true), { fill: shirt, shade: 0.25, weight: OW });
-      if (rich) for (const sd of [-1, 1]) k.poly([[sd * rH * 0.04, tT + 0.5], [sd * rH * 0.36, tT + 0.2], [sd * rH * 0.24, tT + rH * 0.3]], { fill: o.collar || (PALETTE.paperwhite ? 'paperwhite' : 'white'), weight: 'detail' });   // shirt collar points
+      if (rich) for (const sd of [-1, 1]) k.poly([[G.f * rH * 0.18 + sd * rH * 0.04, tT + 0.5], [G.f * rH * 0.18 + sd * rH * 0.36 * (G.f && sd === G.f ? 0.7 : 1), tT + 0.2], [G.f * rH * 0.18 + sd * rH * 0.24 * (G.f && sd === G.f ? 0.7 : 1), tT + rH * 0.3]], { fill: o.collar || (PALETTE.paperwhite ? 'paperwhite' : 'white'), weight: 'detail' });   // shirt collar points
       else k.arc(0, tT + 1.5, rH * 0.26, rH * 0.1, 15, 165, { weight: 'detail' });                    // collar (under the chin)
+      // the head (hair, ears, face) is drawn about the neck so headTilt can turn it
+      const hc = Math.cos(G.ta), hsn = Math.sin(G.ta), N = G.neck;
+      group({ x: N[0] - (N[0] * hc - N[1] * hsn), y: N[1] - (N[0] * hsn + N[1] * hc), rotate: o.headTilt || 0 }, () => {
       // Q版 hair: a big rounded mass that's wider and taller than the head, so it owns the silhouette
-      const P = (pts) => pts.map(([a, b, c]) => [a * rH, hy + b * rH, c]);
+      // (turned: the hair mass shifts toward the back of the head, the fringe follows the face)
+      const Pm = (xo) => (pts) => pts.map(([a, b, c]) => [a * rH + xo, hy + b * rH, c]);
+      const P = Pm(-F * rH * 0.1), PF = Pm(-F * rH * 0.03);   // hair sits back on the head; the fringe stays with it (no notch)
       const backLen = style === 'bob' ? 0.78 : style === 'short' ? 0.05 : 0.3;
       draw(geo.spline(P([[-1.16, backLen, 'c'], [-1.24, -0.35], [-0.86, -1.08], [0, -1.26], [0.86, -1.08], [1.24, -0.35], [1.16, backLen, 'c']]), true), { fill: hair, weight: OW });
       if (style === 'buns') for (const sd of [-1, 1]) k.circle(sd * rH * 0.74, hy - rH * 1.02, rH * 0.34, { fill: hair, weight: OW });
-      if (style !== 'bob') for (const sd of [-1, 1]) { k.ellipse(sd * rH * 1.04, hy + rH * 0.2, rH * 0.15, rH * 0.2, { fill: skin, weight: OW }); if (rich) k.arc(sd * rH * 1.04, hy + rH * 0.2, rH * 0.07, rH * 0.1, sd > 0 ? 100 : -80, sd > 0 ? 260 : 80, { weight: 'fine' }); }
-      k.ellipse(0, hy + rH * 0.04, rH * 1.04, rH * 0.98, { fill: skin, shade: 0.08, weight: OW });
+      if (style !== 'bob') for (const sd of F ? [-F] : [-1, 1]) { const ex0 = F ? -F * rH * 0.82 : sd * rH * 1.04; k.ellipse(ex0, hy + rH * 0.2, rH * 0.15, rH * 0.2, { fill: skin, weight: OW }); if (rich) k.arc(ex0, hy + rH * 0.2, rH * 0.07, rH * 0.1, sd > 0 ? 100 : -80, sd > 0 ? 260 : 80, { weight: 'fine' }); }
+      k.ellipse(F * rH * 0.05, hy + rH * 0.04, rH * 1.04, rH * 0.98, { fill: skin, shade: 0.08, weight: OW });   // turned: the face bulges toward where it looks
       // fringe: chunky rounded clumps over the forehead (side-swept for 'short', straight for the others)
       const fringe = style === 'short'
-        ? P([[-1.17, 0.0, 'c'], [-1.2, -0.5], [-0.8, -1.06], [0, -1.24], [0.8, -1.06], [1.2, -0.5], [1.17, 0.0, 'c'], [0.98, -0.3], [0.7, -0.36, 'c'], [0.5, -0.12], [0.22, -0.36, 'c'], [-0.1, -0.2], [-0.42, -0.4, 'c'], [-0.74, -0.24], [-1.0, -0.36]])
-        : P([[-1.17, 0.05, 'c'], [-1.2, -0.5], [-0.8, -1.06], [0, -1.24], [0.8, -1.06], [1.2, -0.5], [1.17, 0.05, 'c'], [0.96, -0.2], [0.66, -0.3, 'c'], [0.33, -0.2], [0, -0.3, 'c'], [-0.33, -0.2], [-0.66, -0.3, 'c'], [-0.96, -0.2]]);
+        ? PF([[-1.17, 0.0, 'c'], [-1.2, -0.5], [-0.8, -1.06], [0, -1.24], [0.8, -1.06], [1.2, -0.5], [1.17, 0.0, 'c'], [0.98, -0.3], [0.7, -0.36, 'c'], [0.5, -0.12], [0.22, -0.36, 'c'], [-0.1, -0.2], [-0.42, -0.4, 'c'], [-0.74, -0.24], [-1.0, -0.36]])
+        : PF([[-1.17, 0.05, 'c'], [-1.2, -0.5], [-0.8, -1.06], [0, -1.24], [0.8, -1.06], [1.2, -0.5], [1.17, 0.05, 'c'], [0.96, -0.2], [0.66, -0.3, 'c'], [0.33, -0.2], [0, -0.3, 'c'], [-0.33, -0.2], [-0.66, -0.3, 'c'], [-0.96, -0.2]]);
       draw(geo.spline(fringe, true), { fill: hair, weight: OW });
       if (style === 'short') draw(geo.spline(P([[-0.14, -1.18], [-0.04, -1.42], [0.26, -1.36], [0.1, -1.16]]), true), { fill: hair, weight: OW });  // tuft
       if (rich) for (const [a0, b0, a1, b1] of [[-0.55, -0.98, -0.32, -0.62], [0.05, -1.12, 0.12, -0.7], [0.55, -0.95, 0.42, -0.6]])
@@ -1825,12 +1883,13 @@ function installPieces(k, I) {
       else if (expr === 'tired') for (const [ex, ey] of [eL, eR]) { k.ellipse(ex, ey + er * 0.35, er * 0.9, er * 0.6, { fill: 'ink', ink: false }); k.line(ex - er * 1.2, ey - er * 0.1, ex + er * 1.2, ey - er * 0.1, { weight: 'detail' }); }
       else for (const [ex, ey] of [eL, eR]) {
         const big = expr === 'surprised' || expr === 'scared' ? 1.15 : 1;
-        k.ellipse(ex, ey, er * 0.8 * big, er * 1.0 * big, { fill: 'ink', ink: false });       // Q版: solid dot eyes
+        const narrow = G.f && Math.sign(ex - G.dx) === G.f ? 0.78 : 1;                       // the far eye, foreshortened
+        k.ellipse(ex, ey, er * 0.8 * big * narrow, er * 1.0 * big, { fill: 'ink', ink: false });       // Q版: solid dot eyes
         if (o.eyeShine ?? rich) k.circle(ex - er * 0.28, ey - er * 0.36, er * 0.28, { fill: 'white', ink: false });
       }
       if (expr === 'sad' || expr === 'scared') brow(-er * (expr === 'scared' ? 0.5 : 0), er * 0.5); else if (expr === 'surprised') brow(-er * 0.6, 0); else if (expr === 'tired') brow(er * 0.3, -er * 0.2); else if (expr === 'angry') brow(er * 0.35, -er * 0.75);
       else if (rich) for (const [ex, ey] of [eL, eR]) k.arc(ex, ey - er * 1.9, er * 1.15, er * 0.5, 200, 340, { weight: 'detail' });   // soft brows
-      if (rich) k.arc(0, hy + rH * 0.36, rH * 0.05, rH * 0.04, 0, 160, { weight: 'fine' });          // a hint of a nose
+      if (rich || G.f) k.arc(G.dx + G.f * rH * 0.16, hy + rH * 0.38, rH * 0.05, rH * 0.04, G.f > 0 ? -60 : G.f < 0 ? 60 : 0, G.f > 0 ? 120 : G.f < 0 ? 240 : 160, { weight: 'fine' });   // a hint of a nose (in a turn it shows the direction)
       const [mx, my] = G.mouth;
       if (expr === 'happy') draw(geo.spline([[mx - rH * 0.16, my - rH * 0.04, 'c'], [mx + rH * 0.16, my - rH * 0.04, 'c'], [mx + rH * 0.12, my + rH * 0.08], [mx, my + rH * 0.14], [mx - rH * 0.12, my + rH * 0.08]], true), { fill: 'blush', weight: 'detail' });  // D-shaped open smile
       else if (expr === 'surprised') k.ellipse(mx, my + rH * 0.03, rH * 0.07, rH * 0.09, { fill: 'blush', weight: 'detail' });
@@ -1839,12 +1898,13 @@ function installPieces(k, I) {
       else if (expr === 'sad') k.arc(mx, my + rH * 0.08, rH * 0.12, rH * 0.07, 200, 340, { weight: 'detail' });
       else if (expr === 'tired') k.line(mx - rH * 0.1, my + rH * 0.02, mx + rH * 0.1, my + rH * 0.02, { weight: 'detail' });
       else if (o.mouth !== false) k.arc(mx, my - rH * 0.02, rH * 0.12, rH * 0.08, 20, 160, { weight: 'detail' });
-      for (const sd of [-1, 1]) k.ellipse(sd * rH * 0.62, hy + rH * 0.46, rH * 0.17, rH * 0.11, { fill: 'blush', ink: false });   // round pink blush
+      for (const sd of [-1, 1]) { const far = G.f && sd === G.f; k.ellipse(G.f ? G.dx + sd * rH * (far ? 0.46 : 0.56) : sd * rH * 0.62, hy + rH * 0.46, rH * 0.17 * (far ? 0.7 : 1), rH * 0.11, { fill: 'blush', ink: false }); }   // round pink blush
       if (o.glasses) for (const [ex, ey] of [eL, eR]) k.circle(ex, ey, er * 2.1, { weight: 'detail' });
-      if (o.glasses) k.arc(0, eL[1] - er * 0.3, rH * 0.1, rH * 0.06, 200, 340, { weight: 'detail' });
+      if (o.glasses) k.arc((eL[0] + eR[0]) / 2, eL[1] - er * 0.3, Math.abs(eR[0] - eL[0]) * 0.12, rH * 0.06, 200, 340, { weight: 'detail' });
+      });   // end of the head group
       // arms in front of the body
       for (const f of front) f();
-      Object.assign(out, { head: k.toSheet(0, hy), top: k.toSheet(0, hy - rH), mouth: k.toSheet(...G.mouth), unit: s,
+      Object.assign(out, { head: k.toSheet(...G.headT), top: k.toSheet(...G.tilt([0, hy - rH])), mouth: k.toSheet(...G.mouthT), unit: s,
         shoulderR: k.toSheet(...G.shoulder(1)), shoulderL: k.toSheet(...G.shoulder(-1)), feet: k.toSheet(0, 0) });
       return out;
     })); }

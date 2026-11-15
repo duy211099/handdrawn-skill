@@ -217,15 +217,16 @@ Every part is a **rigid paper cut-out**, so the motion has to obey physics:
 - **Hands that act get five fingers** (`k.hand`: wave, point, hold, grab, count). `k.chibi({ wave })`
   already waves an open five-finger hand. Never use a round blob for a hand that is doing the word.
 - **Holding something** (喝 drink, 拿 hold, 打电话 phone): place the object first (`k.chibiLayout` gives the mouth
-  and shoulders without drawing), draw `k.chibi({ reach: { right: wrist, rightElbowDir } })` so the arm bends to
+  and shoulders without drawing), draw `k.chibi({ reach: { right: wrist } })` so the arm bends to
   it, then the object, then `k.grip` on top: back of the hand on the outside, four fingers across the front,
   thumb hidden. A person's right hand (viewer's right) is `side: 'right'`.
-- **Skeleton rules for arms.** Bones keep their length, the elbow never folds shut, and the **wrist stays nearly
-  straight**: the forearm continues the back of the hand. Pass `rightElbowDir` (the direction from the wrist
-  toward the elbow, the way the back of the hand faces) so the arm picks the right elbow. Relaxed holding: elbow
-  down by the side (`[0.35, 1]`). Lifting to the face: elbow out to the side at shoulder height (`[1, 0.25]`).
-  Blend between them as the action moves. Never let a hand's angle come from the object while the arm does its
-  own thing: that's a broken wrist.
+- **Skeleton rules for arms.** `reach` solves the arm in 3D and projects it, like a rig: bones keep their length,
+  and when the hand comes near the shoulder on screen it goes toward the viewer (the arm reads foreshortened)
+  instead of folding shut. The elbow stays on the side of a **pole** for the whole move, so it never flips. The
+  default pole is out to the side and a little down: right for holding at the chest and lifting to the mouth
+  (the elbow rises out to the side by itself). Set `rightPole` / `leftPole` (`[x, y, z]`, +x = the arm's own side,
+  z = toward the viewer) only for other poses, e.g. hand on the chin: `[0.2, 1, 0.3]` (elbow down, in front).
+  Keep one pole for the whole loop, never switch it mid-move.
   - Shoulders sit at the edge of the body, and **an elbow never sinks inside the torso**.
   - Holding something close in front of the chest: the upper arm hangs by the side and the forearm points at the
     viewer, so it looks shorter (`k.chibi` does this for relaxed holds). Don't swing the elbow out to make room.
@@ -244,6 +245,11 @@ Every part is a **rigid paper cut-out**, so the motion has to obey physics:
   start, gentle settle) for moves; `'snappy'` / `'bouncy'` only for playful things. Avoid a bare
   `Math.sin(2πt)`: it never rests and feels restless. Vocab motion plays at 24 fps; set the loop length with
   `sheet.duration` (seconds, default 2.4; ~2.5–3.5 s for an action with holds).
+- **Keyframe the cause, simulate the effect.** Only the primary motion gets beats. Everything it drags along
+  (a head that follows the hand, water in a moving glass, a lid, a tail, a leaf) comes from
+  `k.follow(t, u => driver(u), { key, f, z, r })`: a spring that chases the driver a beat late, overshoots a
+  little and settles, so the motion reads as cause → effect instead of parts on separate timers. Liquid tips by
+  the container's acceleration (`k.accel`) and stays a flat rigid surface. See `examples/vocab-drink.js`.
 - **Show the whole movement.** Use a clear swing that loops (±25–30°), not a twitch. Move the object the
   action acts on too (the cup tips to the mouth, the door swings open).
 - **Look at several frames** (GIF frames tiled, see *Animation*), not only the PNG: at every frame the
