@@ -60,6 +60,8 @@ marks (ā á ǎ à, ü ǖ ǘ ǚ ǜ) are composed like Vietnamese ones.
 
 ## Chinese (vocab cards for Vietnamese learners)
 
+For a vocab drawing don't call `k.word` in the scene: export `vocab` and let the renderer add the card (SKILL.md, *Vocab mode*). `k.word` is for other sheets that show words.
+
 | call | what it does |
 |---|---|
 | `k.word({ hanzi, pinyin, hanviet, meaning, note, x, y, size: 150, align, grid: false, boil: false })` | vocab card: **tone-coloured** characters, drawn steady (identical in every frame, no line boil) so they stay easy to read; under each character its pinyin (same tone colour) and Hán-Việt reading (caps); then the Vietnamese meaning and an optional red note. Returns `{ x, y, w, h, boxes, bottom }` |
@@ -73,6 +75,25 @@ marks (ā á ǎ à, ü ǖ ǘ ǚ ǜ) are composed like Vietnamese ones.
 - `note`: use it for false friends, where the Hán-Việt meaning differs from Mandarin
   (走 zǒu: hán việt *tẩu* = chạy, but 走 = đi).
 - `grid: true` puts each character in a 田字格 box (`'mi'` = 米字格).
+
+## Look (set per render: CLI flag or `sheet` key)
+
+| setting | values | what it does |
+|---|---|---|
+| `theme` | `classic` (cream paper, mottle) · `jianbihua` (see below) · `sheng` (Shēng design system: flat #f7f6f2, ink #191d24, Pleco tones on pinyin, black hair) | vocab scenes default to `sheng` |
+| `theme: 'jianbihua'` | 简笔画: flat fills, brush outline #2B2B2B, 8 traditional colours + skin/grey/hair/blush, rough 0.1, transparent, auto-fit 65% | `--opaque` for the #F6EFE2 paper; `--fit 0.65` |
+| `rough` | 0 … 1 (`classic` 1, `sheng` 0.4) | how hand-made the marks look: wobble, pressure, overshoot, open loops, off-register wash, shadow flicks |
+| `stroke` | `marker` (default) · `brush` | `brush` = gongbi line: pressed start, thick/thin with direction, long pointed tail. Pair with `rough` ≈ 0.2 |
+
+## Timing
+
+| call | what it does |
+|---|---|
+| `k.pop(t, at, fn, { pivot: [x, y], from: 'left'\|'right'\|'top'\|'bottom', dur: 0.12, ease: 'bouncy' })` | paper stop-motion reveal: the part drawn by `fn` is absent before `at` (share of the loop), then pops in from `pivot` with a bouncy settle (or slides in `from` a side) and holds. Set `sheet.poster: 0.99` so stills show the finished picture |
+| `k.motion(t, [[value, beats, ease], …])` | one loop as beats. Starts at the last value (so it loops) and moves to each value over its share of the loop; a repeated value is a hold. `k.motion(t, [[0, 1], [1, 2, 'smooth'], [1, 1.5], [0, 2, 'smooth']])` = rest, lift, hold, lower |
+| `k.ease.smooth / snappy / bouncy` | Apple springs (SwiftUI): bounce 0 / 0.15 / 0.3. `smooth` is the default for everything |
+| `k.ease.easeInOut / easeIn / easeOut / default` | Core Animation cubic-béziers (0.42,0,0.58,1 · 0.42,0,1,1 · 0,0,0.58,1 · 0.25,0.1,0.25,1) |
+| `k.spring(bounce)` | a spring curve p → value for any bounce |
 
 ## Structure
 
@@ -93,7 +114,17 @@ marks (ā á ǎ à, ü ǖ ǘ ǚ ǜ) are composed like Vietnamese ones.
 | `k.shrub(x, groundY, { r: 90, fill, bumps, flowers, flowerFill })` | round bush sitting on the ground |
 | `k.tree(x, groundY, { h: 400, fill, trunk, fruit, fruitFill })` | cloud-crown tree. Returns `{ top, crown }` |
 | `k.cat(x, groundY, { size: 300, pose: 'sit'\|'sleep', fill, eyes: 'open'\|'closed', facing: 'left', bib, stripes, shadow, animate, t })` | cute round cat. sit = front view (size = height), sleep = curled side view (size = length). Returns `{ head, top, tail }` |
-| `k.person(x, groundY, { h: 400, skin, shirt, pants, hair, shoes, bun, wave, shadow })` | front-view person, big head. `wave: true` raises the right arm; with `t` the forearm swings side to side from the elbow. `shadow: false` drops the ground shadow. Returns `{ head, top, hand, feet }` |
+| `k.person(x, groundY, { h: 400, skin, shirt, pants, hair, shoes, bun, wave, shadow })` | front-view person, big head. `wave: true` raises the right arm with an open five-finger hand; with `t` the forearm swings ±28° from the elbow, or set the angle yourself with `waveAngle` (degrees, e.g. from `k.motion`). `shadow: false` drops the ground shadow. `eyes: 'open'|'closed'`, `faceShade` (default 0.1), `hairStyle: 'short'|'bangs'|'bob'|'buns'|'bun'` (hair colour defaults to the theme's `hair`: black in `sheng`). `rightArm: false` leaves the right arm out so the scene can draw its own (holding, drinking, pointing) from the returned `shoulder`. Returns `{ head, top, hand, feet, shoulder, mouth, unit }` (unit = h/100, the person's scale) |
+| `k.hand(x, y, { size: 40, angle: 0, side: 'right'\|'left', spread: 0.7, curl: 0, fill, weight })` | open hand with five fingers, palm to the viewer. (x, y) = wrist, angle 0 = fingers up (+ = clockwise), size = palm width. `curl` bends the fingers in. Returns `{ wrist, center, tip }` |
+| `k.grip(x, y, { size: 60, across, side: 'right'\|'left', angle: 0, thumb: false, fill })` | a hand holding an upright object, front view: back of the hand outside the object's edge, four fingers across its front, thumb hidden. (x, y) = where the hand meets the edge; `angle` = the object's tilt. Draw after the object. Returns `{ wrist }` |
+| `k.liquid(poly, { tilt, fill: 0.6 })` | liquid in a tipping container: level surface, constant amount. `poly` = the inside in the container's own coordinates, `tilt` = the angle you rotate it by. Returns `{ poly, surface }` to draw inside the container's group |
+| `k.highlight(x, y, rx, ry, { angle: -35, fill })` | one small flat highlight, no outline (the lit spot, top-left) |
+| `k.teaglass(x, groundY, { h: 300, tea, lid: true, lidFill })` | glass tea tumbler (玻璃杯): pale tea, standing leaves, screw lid. Returns `{ top, rim }` |
+| `k.thermos(x, groundY, { h: 460, fill: 'jade', handle, flowers })` | vacuum flask (暖水瓶): wide cylinder, short shoulder, cork, side handle, printed blossoms. Returns `{ top }` |
+| `k.enamelmug(x, groundY, { h: 260, fill: 'white', band: 'indigo', inside: 'tea' })` | enamel mug (搪瓷杯): white enamel, dark rim and base band, loop handle. Returns `{ rim }` |
+| `k.ricebowl(x, groundY, { w: 360, fill: 'moonwhite', line: 'indigo', chopsticks: true })` | rice bowl with a dome of rice, a blue line, chopsticks resting across the rim. Returns `{ rim }` |
+| `k.chibi(x, groundY, { h: 400, head: 0.45, hairStyle: 'short'\|'bangs'\|'bob'\|'buns', expression: 'neutral'\|'happy'\|'closed'\|'tired'\|'surprised'\|'sad', shirt, pants, shoes, hair, skin, wave, reach: { right: [x,y], left: [x,y] }, detail: 'simple'\|'rich', glasses, collar, weight: 'bold', eyeShine, hairShine, shadow })` | Q版 person: big head (`head` = share of height), bean body, stubby limbs, thick even outline, dot eyes, blush, chunky hair with a highlight. `wave: degrees` raises the right arm with an open hand; `reach` bends an arm to put its wrist on a sheet point, for holding things with `k.grip`; add `rightElbowDir` / `leftElbowDir` (wrist → elbow direction, the way the back of the hand faces) so the forearm continues the hand and the wrist stays straight (elbow never folds shut; without a direction it hangs down and a little out). Returns `{ head, top, mouth, shoulderR, shoulderL, wristR, wristL, handR, handL, feet, unit }` |
+| `k.chibiLayout(x, groundY, o)` | the same anchors (`mouth`, `shoulderR`, `armLength`, `unit`…) without drawing: place a held thing first, then draw the person reaching for it |
 | `k.window(x, y, w, h, { panes: [2,2], frame, glass, arch, curtains, sill, flowers })` | window with frame, glazing bars, glint, sill |
 | `k.door(x, y, w, h, { fill, arch, glass, panels, knob, step })` | front door |
 | `k.house(x, groundY, { w: 460, h: 300, roof, wall, door, chimney, curtains, flowers, atticWindow })` | house front with roof tiles, door, two windows, chimney. Returns anchors |

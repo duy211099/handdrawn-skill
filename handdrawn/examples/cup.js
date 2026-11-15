@@ -1,5 +1,5 @@
 // A cup of coffee on a saucer, front view. Animated: steam rises (render with --gif or --animate).
-export const sheet = { seed: 4 };
+export const sheet = { theme: 'classic', seed: 4 };
 
 export function draw(k, t = 0) {
   k.title('a morning cup', { sub: 'cà phê sữa, still too hot' });

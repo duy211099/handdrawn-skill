@@ -1,5 +1,9 @@
 # handdrawn — Claude Code skills for hand-drawn illustrations
 
+**Default look: 简笔画 + Q版.** Objects are drawn as 简笔画 (Chinese simple-stroke drawing): flat traditional
+colours and a soft brush outline. People are Q版 (chibi): big heads, dot eyes, blush, and a thick even outline.
+The classic ink-and-marker look below is `--theme classic`.
+
 Ask Claude for a picture ("a teapot", "a cat asleep on a windowsill", "một bát phở") and it draws it in an
 ink-and-marker look: wobbly lines of varying width, marker washes slightly off-register on cream paper. The
 result is one self-contained **looping animated SVG** (frames switched by CSS, no script: it plays in browsers
@@ -23,6 +27,31 @@ There are two skills:
 ![four 3D examples: a mug of coffee on a saucer, a teapot on a trivet, a toaster, a windmill on a hill](docs/preview-3d.jpg)
 
 <img src="docs/toaster-small.gif" width="280" alt="animated toaster: the bread pops up and drops back">
+
+### Chinese vocab pictures
+
+Ask for a picture of a Chinese word ("vẽ 苹果", "picture for 挥手") and the 2D skill draws it plain: one
+subject, no setting, **no words** by default. Concrete words are stills. Actions loop the action itself, in
+detail: a wave is an open five-finger hand swinging, framed waist-up. Abstract words (希望) get a word card
+under the picture: characters, tone-coloured pinyin, Hán-Việt reading and the Vietnamese meaning. For
+flashcards, `--card` also writes a picture+card face and a characters-only face.
+
+Vocab pictures use the **Shēng** look by default (`--theme sheng`): flat #f7f6f2 paper, #191d24 ink, Pleco tone
+colours on the pinyin, pinyin stacked above the hanzi. Ordinary drawings keep the classic cream paper
+(`--theme sheng` works for those too).
+
+Chinese styling comes from the subject and the line, not motifs. People default to black hair with a few real
+hairstyles. Pieces draw everyday things as they look in China: a glass tea tumbler, a thermos, an enamel mug,
+a rice bowl with chopsticks. The palette has traditional colour names (藤黄, 赭石, 花青, 黛, 月白, 青瓷).
+`--stroke brush` gives a gongbi-style brush line.
+
+`--theme jianbihua` (简笔画) is a flashcard set style: flat fills, a soft brush outline, a fixed set of traditional
+colours, a transparent background and automatic framing, so every card in a set matches.
+
+The design follows research on pictures in vocabulary learning: plain, unambiguous pictures (decoration and
+ambiguity hurt), motion only where it carries the meaning (animation helps most for actions; Höffler & Leutner
+2007), and the meaning available somewhere, because picture + meaning beats picture alone (Zhang, Sala & Gobet
+2025).
 
 ## Install
 
