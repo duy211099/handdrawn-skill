@@ -1,6 +1,6 @@
 ---
 name: handdrawn
-description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 people and animals by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead when the user asks for 3D / isometric, when a person acts in depth (drinking, eating, reaching toward the viewer), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (a toaster popping, a drawer sliding out, a windmill turning). Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: Draw a picture of an object, animal, plant, person, food or small scene as one self-contained looping animated SVG (plus a PNG still, or a GIF) in a flat 简笔画 (Chinese simple-stroke) look with Q版 people and animals by default, flat 2D front or side view; a classic ink-and-marker look and the Shēng design-system look are available too. Use when the user asks to draw, sketch or illustrate a thing ("draw a teapot", "a cat asleep on a windowsill", "a bowl of noodles", "vẽ một ly cà phê"), and always for vocab cards, faces, expressions, gestures, animals, plants and food. Use handdrawn-3d instead when the user asks for 3D / isometric, when a person acts in depth (drinking, eating, reaching toward the viewer), or when the motion itself moves in depth and is the point (a drawer sliding out toward you, a fridge door swinging open, something turning about a vertical axis). Buildings, rooms, furniture and vehicles stay 2D unless such a motion is the point. Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn
@@ -33,12 +33,15 @@ Decide before drawing, in this order. The first rule that matches wins:
    reaching forward), 2D can only fake it: the object slides across the face in the picture plane. 3D puts arm,
    object and head in one space (`k.chibi` with `reach` in the 3D kit; see `handdrawn-3d/examples/drink.js`).
    The same Q版 person in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
-4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
-5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
-   machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
-   and furniture, vehicles, a product shot, "how it goes together", or a container where you need to see in
-   from above. The motion happens **in depth** (a hinge, a slide toward the viewer, a turn about a vertical
-   axis), or several parts sit behind one another.
+4. **Animals, plants, food, single objects, and also buildings, rooms, furniture and vehicles → 2D** (the
+   default). Having volume isn't a reason for 3D: a house, a cup or a cat reads best, and cuter, as a flat front or
+   side view. A motion across the picture (steam rising, a leaf swaying, a tail swishing, a glance left and right,
+   toast popping up, sails turning flat to the viewer) is 2D too.
+5. **3D only when the motion itself moves in depth** (toward or away from the viewer, or around something) and
+   that motion is the point: a drawer sliding out toward you, a fridge or oven door swinging open toward you, a
+   lid hinging back, something turning about a vertical axis so you see its other side, parts that move behind
+   one another. Buildings, rooms, furniture and vehicles go 3D only for one of these motions, or when the user
+   asks (rule 1).
 6. **Unsure → 2D**, and offer the other in one line ("want this as an isometric 3D model too?").
 
 Cost to keep in mind: 2D renders in about a second, 24 fps, a few hundred KB. 3D takes 1–16 s, 8–12 fps, ~1 MB.

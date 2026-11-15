@@ -1,6 +1,6 @@
 ---
 name: handdrawn-3d
-description: 3D version of handdrawn, in the same default 简笔画 + Q版 look (traditional palette, clean warm-ink outline, soft light/dark tones, Q版 people and animals; the classic ink-and-marker look on cream paper is --theme classic). Draw an object, person, animal, plant, food or small scene as a 3D model and deliver it as one self-contained looping animated SVG where something in the object moves (a lid rattles, bread pops, sails turn, steam rises), plus a PNG still or GIF. Use when the user asks for 3D, isometric or a 3D-modelled drawing ("draw a teapot in 3D", "an isometric toaster popping", "/handdrawn-3d windmill"), when a person acts in depth (a kid drinking water, eating, reaching toward the viewer: the Q版 person, k.chibi, with 3D arm IK), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (gears turning, a drawer sliding out, a house cut open). Not for vocab cards, faces, expressions or gestures, and not for ordinary flat drawings of animals, plants, food or single objects: those use the 2D handdrawn skill. Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: 3D version of handdrawn, in the same default 简笔画 + Q版 look (traditional palette, clean warm-ink outline, soft light/dark tones, Q版 people and animals; the classic ink-and-marker look on cream paper is --theme classic). Draw an object, person, animal, plant, food or small scene as a 3D model and deliver it as one self-contained looping animated SVG where something in the object moves (a lid rattles, bread pops, sails turn, steam rises), plus a PNG still or GIF. Use when the user asks for 3D, isometric or a 3D-modelled drawing ("draw a teapot in 3D", "an isometric toaster popping", "/handdrawn-3d windmill"), when a person acts in depth (a kid drinking water, eating, reaching toward the viewer: the Q版 person, k.chibi, with 3D arm IK), or when the motion itself moves in depth and is the point (a drawer sliding out toward you, a fridge door swinging open, a lid hinging back, something turning about a vertical axis). Not for vocab cards, faces, expressions or gestures, and not for animals, plants, food, single objects, buildings, rooms, furniture or vehicles that are just standing there or move across the picture: those use the 2D handdrawn skill. Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn-3d
@@ -30,12 +30,15 @@ Decide before drawing, in this order. The first rule that matches wins:
    reaching forward), 2D can only fake it: the object slides across the face in the picture plane. 3D puts arm,
    object and head in one space (`k.chibi` with `reach` in the 3D kit; see `handdrawn-3d/examples/drink.js`).
    The same Q版 person in both, so it stays one look. A **vocab card** for such a word stays 2D (rule 2).
-4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
-5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
-   machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
-   and furniture, vehicles, a product shot, "how it goes together", or a container where you need to see in
-   from above. The motion happens **in depth** (a hinge, a slide toward the viewer, a turn about a vertical
-   axis), or several parts sit behind one another.
+4. **Animals, plants, food, single objects, and also buildings, rooms, furniture and vehicles → 2D** (the
+   default). Having volume isn't a reason for 3D: a house, a cup or a cat reads best, and cuter, as a flat front or
+   side view. A motion across the picture (steam rising, a leaf swaying, a tail swishing, a glance left and right,
+   toast popping up, sails turning flat to the viewer) is 2D too.
+5. **3D only when the motion itself moves in depth** (toward or away from the viewer, or around something) and
+   that motion is the point: a drawer sliding out toward you, a fridge or oven door swinging open toward you, a
+   lid hinging back, something turning about a vertical axis so you see its other side, parts that move behind
+   one another. Buildings, rooms, furniture and vehicles go 3D only for one of these motions, or when the user
+   asks (rule 1).
 6. **Unsure → 2D**, and offer the other in one line ("want this as an isometric 3D model too?").
 
 Cost to keep in mind: 2D renders in about a second, 24 fps, a few hundred KB. 3D takes 1–16 s, 8–12 fps, ~1 MB.

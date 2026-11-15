@@ -12,8 +12,8 @@ The original ink-and-marker look on cream paper is `--theme classic` in both.
 
 | skill | what it draws | when Claude uses it |
 |---|---|---|
-| **`handdrawn`** | flat 2D, front or side view | the default: vocab cards, faces, expressions, gestures, animals, plants, food, single objects |
-| **`handdrawn-3d`** | the subject modelled in 3D from simple solids, any camera angle, soft light/dark tones | when you ask for 3D / isometric (or `/handdrawn-3d`), a person acting **in depth** (drinking, reaching), or a machine, building, room, furniture or vehicle |
+| **`handdrawn`** | flat 2D, front or side view | the default: vocab cards, faces, expressions, gestures, animals, plants, food, objects, and also buildings, rooms, furniture and vehicles |
+| **`handdrawn-3d`** | the subject modelled in 3D from simple solids, any camera angle, soft light/dark tones | when you ask for 3D / isometric (or `/handdrawn-3d`), or when the **motion itself moves in depth**: a person bringing something to the face (drinking, eating), a drawer sliding out toward you, a door swinging open toward you |
 
 Both skills carry the same ordered **"2D or 3D?"** rule in their descriptions, so Claude picks one and says so.
 
@@ -33,7 +33,8 @@ Rendered with `bash docs/demo/build.sh` (default look, on paper). Click a pictur
 | kỷ luật (纪律, abstract) | [<img src="docs/demo/2d-discipline.png" width="220" alt="2D card: alarm clock at 6:00, a Q版 kid stretching, 纪律">](docs/demo/2d-discipline.svg) | [<img src="docs/demo/3d-discipline.png" width="220" alt="3D: alarm clock ringing, a Q版 kid stretching">](docs/demo/3d-discipline.svg) |
 
 Abstract words are vocab cards in 2D (picture + characters, pinyin, Hán-Việt, meaning); 3D draws the same
-metaphor as a scene. Where 3D wins: the drinking kid. The glass comes *toward* the face, which 2D can only fake (the glass slides
+metaphor as a scene. **Which one wins:** 2D for seven of the eight. Volume alone isn't a reason for 3D (the
+house and the cat read best flat). 3D wins only for the drinking kid, where the motion goes in depth. The glass comes *toward* the face, which 2D can only fake (the glass slides
 across the cheek); in 3D the arm, glass and head share one space and line up by construction.
 
 ### The classic look (`--theme classic`)
