@@ -40,6 +40,7 @@ sharp creases lighter. Every call returns a **handle** `{ box: {min, max}, top, 
 | `k.tube(points, r, o)` | round tube along a smooth 3D path: handles, spouts, pipes, cables, stems, legs, arms, straws. `r` or `[r0, r1]` to taper. **Where the path runs inside a solid drawn earlier it is cut at the surface**, so start a handle or spout inside the body and the joint comes out clean (`cut: false` turns this off). `{ straight: true }` keeps corners |
 | `k.panel(points, o)` | flat polygon through 3D points: a sign, a sail, a page, a blade. `{ thick: 3 }` gives it thickness. `{ on: handle }` makes it a **decal** on that solid's face (a door, a slot, a label, a window): drawn with the solid, hidden when that face turns away |
 | `k.line(points, o)` | an ink line through 3D points: seams, grooves, a lid gap, a crack, planks. `{ on: handle, normal: [x, y, z] }` draws it with that solid and hides it when the normal faces away. `{ smooth: true }`, `{ closed: true }`, `{ weight }` |
+| `k.mesh(V, F, o)` | any closed mesh: `V` = `[[x, y, z], …]`, `F` = faces as index lists sharing vertices. For shapes the primitives can't make, e.g. water in a tipped glass cut by its level surface (`in: glass`; see `examples/drink.js`) |
 | `k.shapes.*` | 2D outlines for `extrude`: `rect(w, h)`, `roundRect(w, h, r)`, `circle(r, n)`, `ellipse(rx, ry, n)`, `spline([[u, v], …])` (closed, smooth) |
 
 ### Options for solids
@@ -89,6 +90,8 @@ nearer wins. Within a solid, faces are sorted and hidden faces are skipped. So:
 | `k.pulse(phase = 0, tt = t)` | `0..1..0` once per loop, smooth |
 | `k.smooth(x)` | smoothstep 0..1, for easing; `k.lerp(a, b, u)`, `k.clamp(v, a, b)` |
 | `k.t` | this frame's `t` |
+| `k.follow(t, u => driver(u), { key, f: 2, z: 0.5, r: 0 })` | secondary motion: the value (number or array) chases the driver like a mass on a spring (`f` Hz, `z` damping: 0.2 rings, 0.5–0.7 alive, 1 none; `r` 0 eases in, <0 anticipates). Simulated over a few loops and cached, so it loops seamlessly. Keyframe the cause, `follow` the effect (a head after a hand, a lid after a jolt, water after its glass) |
+| `k.accel(p, u)` | acceleration of a looping path `p(u) → [x, y, z]` in units/s² (drives slosh and swing: "up" for a liquid is gravity minus its container's acceleration) |
 
 Motion patterns:
 - **Hinge** (a lid, a door, a laptop screen, a jaw): `k.group({ about: hingePoint, rotate: { y: angle } }, …)`.

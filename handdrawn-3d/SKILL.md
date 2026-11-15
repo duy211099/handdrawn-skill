@@ -12,7 +12,8 @@ with `t` going round one loop. The output is a **looping animated SVG**: the fra
 script, so it plays in browsers and `<img>` tags. Text uses a built-in hand-drawn font with full **Vietnamese** support.
 
 Kit: `assets/kit.js` · renderer: `assets/render.mjs` · every function and option: `references/kit.md` (**read it
-before writing a scene**) · worked examples: `examples/` (cup, teapot, toaster, windmill: read the closest one).
+before writing a scene**) · worked examples: `examples/` (cup, teapot, toaster, windmill, drink: read the closest one; drink = a person,
+3D arm IK with a pole, sloshing water).
 
 ## Setup (once)
 

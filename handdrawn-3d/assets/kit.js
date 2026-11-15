@@ -402,6 +402,7 @@ export function createKit(opts = {}) {
   const W = opts.width || 1000, H = opts.height || 1000;
   const seed = opts.seed == null ? 1 : opts.seed;
   const t = opts.t || 0;
+  const duration = opts.duration || 16 / 12;   // seconds per loop (frames / fps), for follow()
 
   const body = [];
   const defs = [];
@@ -1331,6 +1332,13 @@ export function createKit(opts = {}) {
     group: group3,
     scope: scoped,
 
+    /** Any closed mesh: V = [[x, y, z], …], F = faces as index lists. For shapes the primitives can't make
+     *  (liquid in a tipped container, cut by its level surface). */
+    mesh(V, F, o = {}) { return addMesh(V, F, o, 'mesh'); },
+    follow: (tt, src, o) => follow(tt, src, o, duration),
+    accel: (p, u) => accelOf(p, u, duration),
+    duration,
+
     /** Box. at = centre of the bottom face, size = [w (x), d (y), h (z)]. { round: r } rounds the vertical edges. */
     box(at, size, o = {}) {
       const [w, d, h] = size;
@@ -1502,6 +1510,44 @@ function camBasis(yaw, pitch) {
   const y = (yaw * Math.PI) / 180, p = (pitch * Math.PI) / 180;
   const cy = Math.cos(y), sy = Math.sin(y), cp = Math.cos(p), sp = Math.sin(p);
   return { V: [sy * cp, -cy * cp, sp], R: [cy, sy, 0], U: [-sp * sy, sp * cy, cp] };
+}
+/* -------------------- secondary motion: second-order dynamics (same as the 2D kit). y chases a driving signal
+ * like a mass on a spring: f = Hz, z = damping (0.2 rings, 0.5–0.7 alive, 1 no overshoot), r = start (0 eases in,
+ * 1 at once, <0 anticipates). Run once over `warm` loops and cached, so it loops seamlessly. */
+function secondOrderLoop(xs, dt, f, z, r, warm) {
+  const k1 = z / (Math.PI * f), k2 = 1 / ((2 * Math.PI * f) ** 2), k3 = (r * z) / (2 * Math.PI * f);
+  const n = xs.length, dim = xs[0].length, sub = 4, h = dt / sub;
+  const k2s = Math.max(k2, (h * h) / 2 + (h * k1) / 2, h * k1);
+  const y = xs[0].slice(), yd = new Array(dim).fill(0), out = [];
+  for (let loop = 0; loop <= warm; loop++)
+    for (let i = 0; i < n; i++) {
+      const x = xs[i], xp = xs[(i - 1 + n) % n];
+      for (let d = 0; d < dim; d++) {
+        const xd = (x[d] - xp[d]) / dt;
+        for (let s = 0; s < sub; s++) { y[d] += h * yd[d]; yd[d] += (h * (x[d] + k3 * xd - y[d] - k1 * yd[d])) / k2s; }
+      }
+      if (loop === warm) out.push(y.slice());
+    }
+  return out;
+}
+const FOLLOW_CACHE = new Map();
+function follow(t, src, o = {}, duration = 1.33) {
+  const n = o.samples || 240, f = o.f == null ? 2 : o.f, z = o.z == null ? 0.5 : o.z, r = o.r || 0, warm = o.warm || 3;
+  const probe = [0, 0.13, 0.29, 0.41, 0.58, 0.71, 0.86].map(src);
+  const key = `${o.key || src}|${n},${f},${z},${r},${warm},${duration}|${JSON.stringify(probe)}`;
+  let table = FOLLOW_CACHE.get(key);
+  if (!table) {
+    table = secondOrderLoop(Array.from({ length: n }, (_, i) => [].concat(src(i / n))), duration / n, f, z, r, warm);
+    if (FOLLOW_CACHE.size > 200) FOLLOW_CACHE.clear();
+    FOLLOW_CACHE.set(key, table);
+  }
+  const u = (((t % 1) + 1) % 1) * n, i = Math.floor(u), a = table[i % n], b = table[(i + 1) % n], w = u - i;
+  const v = a.map((ai, d) => ai + (b[d] - ai) * w);
+  return Array.isArray(probe[0]) ? v : v[0];
+}
+function accelOf(p, u, duration, du = 1 / 480) {
+  const a = p(u - du), b = p(u), c = p(u + du), dt2 = (du * duration) ** 2;
+  return a.map((_, i) => (a[i] - 2 * b[i] + c[i]) / dt2);
 }
 function rotMatrix(r) {
   let m = [1, 0, 0, 0, 1, 0, 0, 0, 1];

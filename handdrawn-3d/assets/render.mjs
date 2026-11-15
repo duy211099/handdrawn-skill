@@ -59,7 +59,7 @@ const times = still ? [atT] : Array.from({ length: nFrames }, (_, i) => i / nFra
 
 // --- pass 1: measure every frame at scale 1, then frame the union
 function measureAt(t) {
-  const k = createKit({ width: W, height: H, seed, transparent, t, camera });
+  const k = createKit({ width: W, height: H, seed, transparent, t, camera, duration: nFrames / fps });
   scene.draw(k, t);
   return k.measure();
 }
@@ -92,7 +92,7 @@ if (box) {
 
 // --- pass 2: draw
 function frameParts(t, frameSeed, idPrefix) {
-  const k = createKit({ width: W, height: H, seed: frameSeed, transparent, t, idPrefix, camera, view });
+  const k = createKit({ width: W, height: H, seed: frameSeed, transparent, t, idPrefix, camera, view, duration: nFrames / fps });
   scene.draw(k, t);
   return k.parts();
 }

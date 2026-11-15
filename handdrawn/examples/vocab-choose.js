@@ -24,6 +24,8 @@ export function draw(k, t = 0) {
   k.drop(t, 0.42, () => {
     const o = { h: 360, hairStyle: 'bob', shirt: 'celadon', pants: 'azurite', expression: 'neutral', shadow: false };
     const L = k.chibiLayout(500, 985, o);
-    k.chibi(500, 985, { ...o, reach: { left: [L.mouth[0] - 18, L.mouth[1] + 40] } });
+    // elbow hangs down in front of the body (leftPole), a fist under the chin
+    const P = k.chibi(500, 985, { ...o, reach: { left: [L.mouth[0] - 18, L.mouth[1] + 40] }, leftPole: [0.2, 1, 0.3] });
+    k.circle(P.wristL[0], P.wristL[1] - L.armWidth * 0.3, L.armWidth * 0.62, { fill: 'skin', weight: 'outline' });
   }, { x: 500, groundY: 985, weight: 'light', tilt: 8, shadow: [110, 12], dur: 0.2 });
 }
