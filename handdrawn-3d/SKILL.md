@@ -1,6 +1,6 @@
 ---
 name: handdrawn-3d
-description: 3D version of handdrawn. Draw an object, animal, plant, food or small scene as a 3D model rendered in a hand-drawn ink-and-marker look (isometric by default, flat light/mid/dark marker tones, wobbly ink outlines, cream paper) and deliver it as one self-contained looping animated SVG where something in the object moves (a lid rattles, bread pops, sails turn, steam rises), plus a PNG still or GIF. Use only when the user asks for 3D, isometric or a 3D-modelled drawing ("draw a teapot in 3D", "an isometric toaster popping", "/handdrawn-3d windmill"); for ordinary drawings use the 2D handdrawn skill. Not for diagrams, charts, flowcharts, UI or interactive pages.
+description: 3D version of handdrawn. Draw an object, animal, plant, food or small scene as a 3D model rendered in a hand-drawn ink-and-marker look (isometric by default, flat light/mid/dark marker tones, wobbly ink outlines, cream paper) and deliver it as one self-contained looping animated SVG where something in the object moves (a lid rattles, bread pops, sails turn, steam rises), plus a PNG still or GIF. Use when the user asks for 3D, isometric or a 3D-modelled drawing ("draw a teapot in 3D", "an isometric toaster popping", "/handdrawn-3d windmill"), or when the subject is a machine, mechanism, building, room, furniture or vehicle whose point is its volume or a motion in depth (gears turning, a drawer sliding out, a house cut open). Not for vocab cards, people, faces, expressions or gestures, and not for ordinary flat drawings of animals, plants, food or single objects: those use the 2D handdrawn skill. Not for diagrams, charts, flowcharts, UI or interactive pages.
 ---
 
 # handdrawn-3d
@@ -14,6 +14,29 @@ script, so it plays in browsers and `<img>` tags. Text uses a built-in hand-draw
 Kit: `assets/kit.js` · renderer: `assets/render.mjs` · every function and option: `references/kit.md` (**read it
 before writing a scene**) · worked examples: `examples/` (cup, teapot, toaster, windmill, drink: read the closest one; drink = a person,
 3D arm IK with a pole, sloshing water).
+
+## 2D or 3D? (shared with the other skill: the same rule in both)
+
+Decide before drawing, in this order. The first rule that matches wins:
+
+1. **The user names it.** "3D", "isometric", "model", "/handdrawn-3d" → 3D. "flat", "icon", "sticker", "card",
+   "简笔画", "Q版", "/handdrawn" → 2D.
+2. **Vocab cards, lessons, a set or series → 2D.** Every card must share one look, and only 2D has the word
+   layout, pinyin, hanzi and 24 fps.
+3. **People, faces, expressions, emotions, gestures → 2D.** The Q版 chibi exists only in 2D. People built from 3D
+   solids look blocky and take many rounds. When a person **acts in depth** (drinks, reaches, opens, holds),
+   stay 2D: `reach` already solves the arm in 3D and projects it.
+4. **Animals, plants, food, a single everyday object seen from the front or side → 2D** (the default).
+5. **3D when the subject is about volume or how it's built, and it's a thing, not a character:**
+   machines and mechanisms (a toaster popping, gears, a windmill, a fan, a drawer sliding out), buildings, rooms
+   and furniture, vehicles, a product shot, "how it goes together", or a container where you need to see in
+   from above. The motion happens **in depth** (a hinge, a slide toward the viewer, a turn about a vertical
+   axis), or several parts sit behind one another.
+6. **Unsure → 2D**, and offer the other in one line ("want this as an isometric 3D model too?").
+
+Cost to keep in mind: 2D renders in about a second, 24 fps, a few hundred KB. 3D takes 1–16 s, 8–12 fps, ~1 MB.
+
+If the rule picks 2D, say so in one line and use the other skill instead.
 
 ## Setup (once)
 

@@ -13,8 +13,8 @@ There are two skills:
 
 | skill | what it draws | when Claude uses it |
 |---|---|---|
-| **`handdrawn`** | flat 2D, front or side view, like a children's-book or field-notebook sketch. The lines "boil" and the scene can add a small motion (steam, a swaying tail) | any ordinary "draw a …" request |
-| **`handdrawn-3d`** | the subject modelled in 3D from simple solids, drawn isometric (or any camera angle) with flat light/mid/dark marker tones. Something in the object moves: a lid rattles, toast pops, sails turn | only when you ask for 3D / isometric, or call `/handdrawn-3d` |
+| **`handdrawn`** | flat 2D, front or side view, like a children's-book or field-notebook sketch. The lines "boil" and the scene can add a small motion (steam, a swaying tail) | the default: vocab cards, people, faces, gestures, animals, plants, food, single objects |
+| **`handdrawn-3d`** | the subject modelled in 3D from simple solids, drawn isometric (or any camera angle) with flat light/mid/dark marker tones. Something in the object moves: a lid rattles, toast pops, sails turn | when you ask for 3D / isometric (or `/handdrawn-3d`), or the subject is a machine, building, room, furniture or vehicle that moves in depth. Both skills carry the same "2D or 3D?" rule |
 
 ### handdrawn (2D)
 
