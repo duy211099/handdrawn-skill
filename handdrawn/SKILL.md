@@ -194,11 +194,24 @@ consistent (the person is always `k.chibi`, objects are plain 简笔画):
 
 Pick the metaphor that has **one** reading; when two could fit, use the one that matches the card's meaning.
 
-**Paper stop-motion reveal** (optional, good for abstract words and lesson intros): build the picture part by part
-with `k.pop(t, at, () => …, { pivot | from })`. Each part pops in with a small bouncy settle, then the finished
-picture holds for the rest of the loop. Use 3–6 parts, in the order you'd explain them. Set `sheet.poster: 0.99` so
-the still and the first frame show the finished picture, and `fps: 12` for a tactile, hand-made feel. Nouns stay
-plain stills.
+**Paper stop-motion reveal** (optional, good for abstract words and lesson intros): build the picture part by part,
+then the finished picture holds for the rest of the loop. Use 3–6 parts. Set `sheet.poster: 0.99` so the still and
+the first frame show the finished picture, and `fps: 12` for a tactile, hand-made feel. Nouns stay plain stills.
+Every part is a **rigid paper cut-out**, so the motion has to obey physics:
+- **Paper never grows or stretches.** Objects come in with `k.pop(…, { from })` (slide in from a side) or
+  `k.drop` (fall onto the ground). `k.pop` with only a `pivot` scales up: keep that for ink marks (ticks, stamps).
+- **Things fall under gravity.** `k.drop` speeds up as it falls, hits `groundY`, bounces lower each time. Its
+  shadow stays on the ground and darkens as it comes down (pass `shadow: [rx, ry]`, draw the part with
+  `shadow: false`).
+- **Weight decides the bounce.** `weight: 'heavy'` (a post, a table, a weight) barely bounces; `'light'` (a person
+  hopping in, paper, a leaf, a coin) bounces and rocks more.
+- **Cut-outs land a little crooked.** `tilt: 6…15` makes a part arrive turned and settle flat (rocking on its
+  contact point for `k.drop`).
+- **Order: ground and base objects → people → the contact last.** The contact (a hand presses the switch, the
+  magnifier reaches the meter, someone lands) is the beat that carries the meaning, and the thing that is hit
+  reacts: wrap it in `k.react(t, at, …, { pivot, push })` with `at` = the moment of contact.
+- **Overlap the parts.** Start the next part while the last one is still settling (about 2/3 into its `dur`).
+- **Lock the camera.** The sheet never zooms, pans or shakes; only the parts move. Keep the hanzi still.
 
 **Make the action detailed.** The parts doing the action must be drawn properly, big enough to read:
 - **Hands that act get five fingers** (`k.hand`: wave, point, hold, grab, count). `k.chibi({ wave })`

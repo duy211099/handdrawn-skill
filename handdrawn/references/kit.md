@@ -89,7 +89,9 @@ For a vocab drawing don't call `k.word` in the scene: export `vocab` and let the
 
 | call | what it does |
 |---|---|
-| `k.pop(t, at, fn, { pivot: [x, y], from: 'left'\|'right'\|'top'\|'bottom', dur: 0.12, ease: 'bouncy' })` | paper stop-motion reveal: the part drawn by `fn` is absent before `at` (share of the loop), then pops in from `pivot` with a bouncy settle (or slides in `from` a side) and holds. Set `sheet.poster: 0.99` so stills show the finished picture |
+| `k.pop(t, at, fn, { from: 'left'\|'right'\|'top'\|'bottom', distance, tilt, pivot, weight, ease, dur: 0.12 })` | paper stop-motion reveal of a rigid cut-out: absent before `at` (share of the loop), then slides in `from` a side (default bottom), arriving turned by `tilt`° about `pivot` and settling flat, then holds. `weight: 'heavy'\|'normal'\|'light'` sets the overshoot. `pivot` without `from` scales up from that point: ink marks only. Set `sheet.poster: 0.99` so stills show the finished picture |
+| `k.drop(t, at, fn, { x, groundY, height, weight, tilt, shadow: [rx, ry], dur: 0.16 })` | falls under gravity onto `groundY`, bounces lower each time (heavy barely, light more), rocks on its contact point until flat if `tilt`. The shadow stays on the ground and darkens as it lands; draw the part with `shadow: false`. It touches down after about ⅓ of `dur` (light), ½ (normal), ⅔ (heavy): use that time for `k.react` |
+| `k.react(t, at, fn, { pivot, amount: 6, push: [dx, dy], weight, dur: 0.12 })` | the part that gets hit: drawn as usual, and at `at` it jolts by `push` and rocks `amount`° about `pivot`, damped back to rest |
 | `k.motion(t, [[value, beats, ease], …])` | one loop as beats. Starts at the last value (so it loops) and moves to each value over its share of the loop; a repeated value is a hold. `k.motion(t, [[0, 1], [1, 2, 'smooth'], [1, 1.5], [0, 2, 'smooth']])` = rest, lift, hold, lower |
 | `k.ease.smooth / snappy / bouncy` | Apple springs (SwiftUI): bounce 0 / 0.15 / 0.3. `smooth` is the default for everything |
 | `k.ease.easeInOut / easeIn / easeOut / default` | Core Animation cubic-béziers (0.42,0,0.58,1 · 0.42,0,1,1 · 0,0,0.58,1 · 0.25,0.1,0.25,1) |

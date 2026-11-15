@@ -1850,26 +1850,85 @@ function installPieces(k, I) {
     })); }
   };
 
+  /* ---- paper stop-motion physics. Parts are RIGID flat cut-outs: they slide, fall, tilt and rock, never stretch. ---- */
+  const WEIGHT = { heavy: { bounce: 0.05, e: 0.12, rock: 0.5 }, normal: { bounce: 0.3, e: 0.3, rock: 1 }, light: { bounce: 0.5, e: 0.5, rock: 1.4 } };
+  const weightOf = (o) => WEIGHT[o.weight] || WEIGHT.normal;
+  // group options that rotate by deg about (cx, cy), then move by (dx, dy)
+  const about = (cx, cy, deg, dx = 0, dy = 0) => {
+    const a = (deg * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+    return { x: cx - (ca * cx - sa * cy) + dx, y: cy - (sa * cx + ca * cy) + dy, rotate: deg };
+  };
+
   /**
-   * Paper stop-motion reveal (the 'assemble' animation): the part drawn by fn is absent before `at`, then pops in like
-   * a flat paper cut-out (scale up from its pivot with a small settling bounce, or slides in from a side), then holds.
-   * t, at, dur are shares of the loop (0…1). Use a few parts with staggered `at`, then leave the end of the loop as a
-   * hold so the finished picture stays on screen.
-   *   k.pop(t, 0.10, () => k.chibi(…), { pivot: [500, 930] })          // grows from the feet
-   *   k.pop(t, 0.30, () => k.ricebowl(…), { from: 'right' })            // slides in from the right
-   * opts: pivot [x, y] (default the sheet centre), dur 0.12, ease 'bouncy' (any k.ease name), from 'left'|'right'|'top'|'bottom'
+   * Paper stop-motion reveal (the 'assemble' animation): the part drawn by fn is absent before `at`, then comes in as
+   * a rigid paper cut-out and holds. t, at, dur are shares of the loop (0…1). Leave the end of the loop as a hold.
+   *   k.pop(t, 0.30, () => k.ricebowl(…), { from: 'right', tilt: 8 })   // slides in, lands tilted, settles flat
+   *   k.pop(t, 0.16, () => k.line(…tick…), { pivot: [cx, cy] })          // a mark stamped on: grows from the pivot
+   * opts: from 'left'|'right'|'top'|'bottom' (the default), distance, tilt (degrees it arrives turned, settles to 0,
+   * about `pivot` or the sheet centre), weight 'heavy'|'normal'|'light' (how much it overshoots), ease (overrides
+   * weight), dur 0.12. `pivot` WITHOUT `from` scales the part up from that point: only for ink marks (ticks, stamps,
+   * sparkles), never for objects, since paper can't grow.
    */
   k.pop = (t, at, fn, o = {}) => {
     const dur = o.dur || 0.12, p = (t - at) / dur;
     if (p <= 0) return null;
     if (p >= 1) return fn();
-    const e = (EASE[o.ease] || EASE.bouncy)(p);
-    if (o.from) {
-      const d = (1 - e) * (o.distance || k.W * 0.6), dir = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }[o.from] || [0, 0];
-      return group({ x: dir[0] * d, y: dir[1] * d }, fn);
+    const W8 = weightOf(o), e = (EASE[o.ease] || springCurve(W8.bounce))(p);
+    if (o.pivot && !o.from) {
+      const [px, py] = o.pivot, sc = Math.max(0.001, e);
+      return group({ x: px * (1 - sc), y: py * (1 - sc), scale: sc }, fn);
     }
-    const [px, py] = o.pivot || [k.W / 2, k.H / 2], sc = Math.max(0.001, e);
-    return group({ x: px * (1 - sc), y: py * (1 - sc), scale: sc }, fn);
+    const from = o.from || 'bottom', d = (1 - e) * (o.distance || k.W * 0.6);
+    const dir = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }[from] || [0, 1];
+    const [px, py] = o.pivot || [k.W / 2, k.H / 2];
+    return group(about(px, py, (o.tilt || 0) * (1 - e), dir[0] * d, dir[1] * d), fn);
+  };
+
+  /**
+   * Drop a rigid part onto the ground under gravity: it falls (speeding up), hits groundY, bounces a few times (each
+   * lower: restitution by weight) and, if it came in tilted, rocks on its contact point until it lies flat.
+   * Its shadow stays on the ground and darkens and grows as it comes down: give `shadow: [rx, ry]` and draw the
+   * part itself with its own shadow off (shadow: false).
+   *   k.drop(t, 0.2, () => k.chibi(500, 985, { …, shadow: false }), { x: 500, groundY: 985, shadow: [90, 10] })
+   * opts: x, groundY (the contact point, default sheet centre / bottom), height (fall, default 0.45·H), weight
+   * 'heavy'|'normal'|'light', tilt (degrees while falling), dur 0.16.
+   */
+  k.drop = (t, at, fn, o = {}) => {
+    const dur = o.dur || 0.16, p = (t - at) / dur;
+    const x = o.x == null ? k.W / 2 : o.x, gy = o.groundY == null ? k.H * 0.9 : o.groundY;
+    const W8 = weightOf(o), h = o.height || k.H * 0.45;
+    const sh = (s) => { if (o.shadow) k.shadow(x, gy, o.shadow[0] * (0.35 + 0.65 * s), o.shadow[1] * (0.35 + 0.65 * s), { opacity: 0.9 * (0.25 + 0.75 * s), lines: s > 0.98 ? 2 : false }); };
+    if (p <= 0) return null;
+    if (p >= 1) { sh(1); return fn(); }
+    // normalised ballistics: h = 1, g = 2, so the fall takes 1 and a bounce launched at speed v lasts v and rises v²/4
+    const vs = []; for (let v = 2 * W8.e; v * v / 4 > 0.003; v *= W8.e) vs.push(v);
+    const T = 1 + vs.reduce((a, v) => a + v, 0) + 0.25;           // + a short rest at the end
+    let tau = p * T, y;
+    if (tau < 1) y = 1 - tau * tau;
+    else {
+      let r = tau - 1; y = 0;
+      for (const v of vs) { if (r < v) { y = (v * r - r * r) / 1; break; } r -= v; }
+    }
+    // rocking: hold the tilt while falling, then a damped rock about the contact point that ends flat
+    let ang = o.tilt || 0;
+    if (tau >= 1) { const s = (tau - 1) / (T - 1); ang = (o.tilt || 0) * W8.rock * Math.exp(-3 * s) * Math.cos(Math.PI * 3 * s) * (1 - s); }
+    sh(1 - y);
+    return group(about(x, gy, ang, 0, -y * h), fn);
+  };
+
+  /**
+   * A part hit by something (the contact beat): it is drawn as usual, and from `at` it jolts (pushed by `push`
+   * [dx, dy]) and rocks about `pivot` (where it stands), damped back to rest over `dur`.
+   *   k.react(t, 0.62, () => k.meter(…), { pivot: [700, 900], amount: 6, push: [12, 0] })
+   * opts: pivot (default sheet centre), amount (degrees, 6), push [dx, dy], dur 0.12, weight (heavy jolts less).
+   */
+  k.react = (t, at, fn, o = {}) => {
+    const dur = o.dur || 0.12, s = (t - at) / dur;
+    if (s <= 0 || s >= 1) return fn();
+    const W8 = weightOf(o), amp = Math.exp(-3.5 * s) * (1 - s) * W8.rock;
+    const [px, py] = o.pivot || [k.W / 2, k.H / 2], push = o.push || [0, 0];
+    const kick = Math.sin(Math.PI * Math.min(1, s * 3)) * amp;   // pushed out fast, then back
+    return group(about(px, py, (o.amount == null ? 6 : o.amount) * amp * Math.sin(2 * Math.PI * 2 * s), push[0] * kick, push[1] * kick), fn);
   };
 
   /** One small flat highlight (light, no outline): the lit spot on a round or glossy thing. Light comes from the top-left. */
